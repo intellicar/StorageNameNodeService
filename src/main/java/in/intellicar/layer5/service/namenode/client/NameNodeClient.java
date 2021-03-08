@@ -7,6 +7,7 @@ import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.vertx.core.Vertx;
 
 import java.util.logging.Logger;
 
@@ -15,17 +16,17 @@ public class NameNodeClient implements Runnable{
     private final String host;
     private final int port;
     private String serverName;
-    private StorageClsMetaBeacon beacon;
+    private Vertx vertx;
     private Logger logger;
 
     private ChannelFuture channelFuture;
     private Thread clientThread;
 
-    public NameNodeClient(String host, int port, String serverName, StorageClsMetaBeacon beacon, Logger logger) {
+    public NameNodeClient(String host, int port, String serverName, Vertx vertx, Logger logger) {
         this.logger = logger;
         this.host = host;
         this.port = port;
-        this.beacon = beacon;
+        this.vertx = vertx;
         this.channelFuture = null;
         this.clientThread = null;
         this.serverName = serverName;
@@ -49,7 +50,7 @@ public class NameNodeClient implements Runnable{
             b.group(workerGroup);
             b.channel(NioSocketChannel.class);
             b.option(ChannelOption.SO_KEEPALIVE, true);
-            b.handler(new NameNodeClientInitializer(serverName, beacon, logger));
+            b.handler(new NameNodeClientInitializer(serverName, vertx, logger));
 
             channelFuture = b.connect(host, port).sync();
 
@@ -60,15 +61,5 @@ public class NameNodeClient implements Runnable{
             workerGroup.shutdownGracefully();
         }
     }
-
-//    public static void main(String[] args) throws Exception {
-//        Logger logger = Logger.getLogger("Client");
-        //////Single client
-//        NameNodeClient client = new NameNodeClient("192.168.0.116", 10107, "/server/naveen/mb15", logger);
-        //client.startClient();
-//        Thread clientThread = new Thread(client);
-//        clientThread.start();
-//        clientThread.join();
-//    }
 
 }

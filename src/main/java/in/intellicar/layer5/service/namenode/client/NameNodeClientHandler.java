@@ -3,10 +3,13 @@ package in.intellicar.layer5.service.namenode.client;
 import in.intellicar.layer5.beacon.Layer5Beacon;
 import in.intellicar.layer5.beacon.Layer5BeaconDeserializer;
 import in.intellicar.layer5.beacon.Layer5BeaconParser;
+import in.intellicar.layer5.beacon.storagemetacls.PayloadTypes;
 import in.intellicar.layer5.beacon.storagemetacls.StorageClsMetaBeacon;
 import in.intellicar.layer5.beacon.storagemetacls.StorageClsMetaBeaconDeser;
 import in.intellicar.layer5.beacon.storagemetacls.StorageClsMetaPayload;
+import in.intellicar.layer5.beacon.storagemetacls.payload.metaclsservice.AssociatedInstanceIdReq;
 import in.intellicar.layer5.beacon.storagemetacls.payload.metaclsservice.InstanceIdToBuckReq;
+import in.intellicar.layer5.beacon.storagemetacls.service.common.mysql.MySQLQueryHandler;
 import in.intellicar.layer5.data.Deserialized;
 import in.intellicar.layer5.utils.LittleEndianUtils;
 import in.intellicar.layer5.utils.sha.SHA256Item;
@@ -29,28 +32,34 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
 
     private Logger logger;
     private Layer5BeaconParser l5parser;
-    private StorageClsMetaBeacon beacon;
+    private Vertx vertx;
     private byte[] handlerBuffer;
     private int bufridx;
     private int bufwidx;
     private String serverName;
+    public Message<StorageClsMetaPayload> event;
     private static int seqId = 0;
+    StorageClsMetaPayload payload;
 
-    public Vertx vertx;
     public EventBus eventBus;
 
-    public NameNodeClientHandler(Layer5BeaconParser l5parser, String serverName, StorageClsMetaBeacon beacon, Logger logger){
+    public NameNodeClientHandler(Layer5BeaconParser l5parser, String serverName, Vertx vertx, Logger logger){
         this.l5parser = l5parser;
         this.serverName = serverName;
-        this.beacon = beacon;
+        this.vertx = vertx;
         this.logger = logger;
 
-        this.vertx = vertx;
         this.eventBus = vertx.eventBus();
-        this.seqId = 0;
 
         Layer5BeaconDeserializer storageMetaClsAPIDeser = new StorageClsMetaBeaconDeser();
         l5parser.registerDeserializer(storageMetaClsAPIDeser.getBeaconType(), storageMetaClsAPIDeser);
+
+        this.eventBus.consumer("/clientreqhandler", new Handler<Message<StorageClsMetaPayload>>() {
+            public void handle(Message<StorageClsMetaPayload> event) {
+                NameNodeClientHandler.this.payload = event.body();
+                NameNodeClientHandler.this.event = event;
+            }
+        });
 
         handlerBuffer = new byte[16 * 1024];
         bufridx = 0;
@@ -58,6 +67,7 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
     }
 
     public void channelActive(ChannelHandlerContext ctx) throws Exception{
+        StorageClsMetaBeacon beacon = new StorageClsMetaBeacon(seqId++, payload);;
         ctx.writeAndFlush(Unpooled.wrappedBuffer(returnSerializedByteStreamOfBeacon(beacon)));
     }
 
@@ -158,17 +168,9 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
 
             StorageClsMetaBeacon storageClsMetaBeacon = (StorageClsMetaBeacon) eachBeacon;
             logger.info("Beacon received::" + storageClsMetaBeacon.toJsonString(logger));
-
-            // Reply back result via eventbus
-            Handler<AsyncResult<Message<StorageClsMetaPayload>>> replyCallback = new Handler<>() {
-                @Override
-                public void handle(AsyncResult<Message<StorageClsMetaPayload>> event) {
-                        // TODO : send to eventbus
-                        logger.info("Message Received from NameNode Client Handler: \n" + event.result().body().toJsonString(logger));
-                }
-            };
-
-            eventBus.request("/namenodeclienthandler", storageClsMetaBeacon.getPayload(), replyCallback);
+            if (event!= null){
+                event.reply(storageClsMetaBeacon.payload);
+            }
         }
     }
 

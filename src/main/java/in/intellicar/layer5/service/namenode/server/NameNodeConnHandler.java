@@ -41,7 +41,6 @@ public class NameNodeConnHandler extends ChannelInboundHandlerAdapter {
     public Vertx vertx;
 
     public EventBus eventBus;
-    public MessageConsumer<StorageClsMetaPayload> eventConsumer;
     public LinkedBlockingQueue<StorageClsMetaPayload> mailbox;
 
     public int seqId;
@@ -61,7 +60,6 @@ public class NameNodeConnHandler extends ChannelInboundHandlerAdapter {
         this.vertx = vertx;
 
         this.eventBus = vertx.eventBus();
-        this.eventConsumer = null;
         this.mailbox = new LinkedBlockingQueue<>();
 
         this.seqId = 0;
@@ -145,22 +143,6 @@ public class NameNodeConnHandler extends ChannelInboundHandlerAdapter {
         return layer5Beacons;
     }
 
-    public void prepareConsumer() {
-        if (eventConsumer == null) {
-            eventConsumer = eventBus.consumer("/handler/" + handlerCountLocal);
-            Handler<Message<StorageClsMetaPayload>> handlerTopicCallback = new Handler<Message<StorageClsMetaPayload>>() {
-                @Override
-                public void handle(Message<StorageClsMetaPayload> event) {
-                    if (ctx != null && !ctx.isRemoved()) {
-                        mailbox.add(event.body());
-                        ctx.pipeline().fireUserEventTriggered(MAIL_ADDED);
-                    }
-                }
-            };
-            eventConsumer.handler(handlerTopicCallback);
-        }
-    }
-
     public void handleLayer5Beacons(ArrayList<Layer5Beacon> layer5Beacons) {
         for (Layer5Beacon eachBeacon : layer5Beacons) {
             if (eachBeacon.getBeaconType() != 1) {
@@ -169,17 +151,7 @@ public class NameNodeConnHandler extends ChannelInboundHandlerAdapter {
 
             StorageClsMetaBeacon storageClsMetaBeacon = (StorageClsMetaBeacon) eachBeacon;
             logger.info("Beacon received::" + storageClsMetaBeacon.toJsonString(logger));
-            Handler<AsyncResult<Message<StorageClsMetaPayload>>> replyCallback = new Handler<>() {
-                @Override
-                public void handle(AsyncResult<Message<StorageClsMetaPayload>> event) {
-                    if (ctx != null && !ctx.isRemoved()) {
-                        mailbox.add(event.result().body());
-                        ctx.pipeline().fireUserEventTriggered(MAIL_ADDED);
-                    }
-                }
-            };
 
-            eventBus.request("/mysqlqueryhandler", storageClsMetaBeacon.getPayload(), replyCallback);
         }
     }
 
@@ -208,7 +180,6 @@ public class NameNodeConnHandler extends ChannelInboundHandlerAdapter {
             logger.log(Level.SEVERE, "Exception while creating and sending LA5 Beacon", e);
         }
     }
-
 
     @Override
     public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {

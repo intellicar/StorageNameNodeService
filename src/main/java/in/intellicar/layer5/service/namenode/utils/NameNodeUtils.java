@@ -1,7 +1,9 @@
 package in.intellicar.layer5.service.namenode.utils;
 
 import in.intellicar.layer5.beacon.storagemetacls.StorageClsMetaBeacon;
+import in.intellicar.layer5.beacon.storagemetacls.StorageClsMetaPayload;
 import in.intellicar.layer5.beacon.storagemetacls.payload.metaclsservice.AssociatedInstanceIdReq;
+import in.intellicar.layer5.beacon.storagemetacls.payload.metaclsservice.AssociatedInstanceIdRsp;
 import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.client.AccIdGenerateReq;
 import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.client.AccIdGenerateRsp;
 import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.internal.AccIdRegisterReq;
@@ -10,7 +12,12 @@ import in.intellicar.layer5.service.namenode.client.NameNodeClient;
 import in.intellicar.layer5.utils.LittleEndianUtils;
 import in.intellicar.layer5.utils.sha.SHA256Item;
 import in.intellicar.layer5.utils.sha.SHA256Utils;
+import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
+import io.vertx.core.Handler;
+import io.vertx.core.Vertx;
+import io.vertx.core.eventbus.EventBus;
+import io.vertx.core.eventbus.Message;
 import io.vertx.mysqlclient.MySQLPool;
 import io.vertx.sqlclient.Row;
 import io.vertx.sqlclient.RowSet;
@@ -109,17 +116,36 @@ TODO: Client End
 1. Get InstanceId corresponding to accountName
 2. Send AccIdRegisterReq to InstanceId
 **/
-    public static Future<SHA256Item> getInstanceID(SHA256Item accountID, int seqID,  Logger logger) throws InterruptedException {
+    public static Future<SHA256Item> getInstanceID(Vertx vertx, EventBus eventBus,SHA256Item accountID, int seqID, Logger logger) throws InterruptedException {
 
         AssociatedInstanceIdReq req = new AssociatedInstanceIdReq(accountID);
         StorageClsMetaBeacon beacon = new StorageClsMetaBeacon(seqID, req);
 
-        NameNodeClient client = new NameNodeClient("192.168.0.116", 10107, "/server/naveen/mb15", beacon, logger);
+        NameNodeClient client = new NameNodeClient("192.168.0.116", 10107, "/server/naveen/mb15", vertx, logger);
         client.startClient();
         Thread clientThread = new Thread(client);
         clientThread.start();
         clientThread.join();
-        return null;
+
+        Future<Message<StorageClsMetaPayload>> future = eventBus.request("clientreqhandler", beacon);
+
+        while (true) {
+            synchronized (future) {
+
+                try {
+                    future.wait(500);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+            if (future.succeeded()) {
+                AssociatedInstanceIdRsp payload = (AssociatedInstanceIdRsp) future.result().body();
+
+                return Future.succeededFuture(payload.instanceID);
+            } else {
+                return Future.failedFuture(future.cause());
+            }
+        }
     }
 
     public static Future<Integer> getAck() {

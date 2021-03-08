@@ -5,14 +5,22 @@ import in.intellicar.layer5.beacon.Layer5BeaconDeserializer;
 import in.intellicar.layer5.beacon.Layer5BeaconParser;
 import in.intellicar.layer5.beacon.storagemetacls.StorageClsMetaBeacon;
 import in.intellicar.layer5.beacon.storagemetacls.StorageClsMetaBeaconDeser;
+import in.intellicar.layer5.beacon.storagemetacls.StorageClsMetaPayload;
 import in.intellicar.layer5.beacon.storagemetacls.payload.metaclsservice.InstanceIdToBuckReq;
 import in.intellicar.layer5.data.Deserialized;
 import in.intellicar.layer5.utils.LittleEndianUtils;
 import in.intellicar.layer5.utils.sha.SHA256Item;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
+import io.vertx.core.AsyncResult;
+import io.vertx.core.Context;
+import io.vertx.core.Handler;
+import io.vertx.core.Vertx;
+import io.vertx.core.eventbus.EventBus;
+import io.vertx.core.eventbus.Message;
 
 import java.util.ArrayList;
 import java.util.logging.Logger;
@@ -26,13 +34,20 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
     private int bufridx;
     private int bufwidx;
     private String serverName;
-    private static int nameIncrementer = 0;
+    private static int seqId = 0;
+
+    public Vertx vertx;
+    public EventBus eventBus;
 
     public NameNodeClientHandler(Layer5BeaconParser l5parser, String serverName, StorageClsMetaBeacon beacon, Logger logger){
         this.l5parser = l5parser;
         this.serverName = serverName;
         this.beacon = beacon;
         this.logger = logger;
+
+        this.vertx = vertx;
+        this.eventBus = vertx.eventBus();
+        this.seqId = 0;
 
         Layer5BeaconDeserializer storageMetaClsAPIDeser = new StorageClsMetaBeaconDeser();
         l5parser.registerDeserializer(storageMetaClsAPIDeser.getBeaconType(), storageMetaClsAPIDeser);
@@ -48,23 +63,10 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, ByteBuf msg) throws Exception {
-        ByteBuf byteBuf = (ByteBuf) msg;
-        logger.info("Received a message");
-
-        ArrayList<StorageClsMetaBeacon> beaconsFound = new ArrayList<>();
-
-        while (byteBuf.isReadable() && bufwidx < (handlerBuffer.length - 1024)) {
-            int bytesToCopy = 1024;
-            if (byteBuf.readableBytes() < 1024) {
-                bytesToCopy = byteBuf.readableBytes();
-            }
-            byteBuf.readBytes(handlerBuffer, bufwidx, bytesToCopy);
-            bufwidx += bytesToCopy;
-            beaconsFound.addAll(parseLayer5Beacons());
+        ArrayList<Layer5Beacon> layer5Beacons = parseLayer5Beacons(msg);
+        if (layer5Beacons.size() > 0){
+            handleLayer5Beacons(layer5Beacons);
         }
-
-        //TODO: Send messages via eventbus
-        logger.info("Total beacons Found: " + beaconsFound.size());
     }
 
     private byte[] returnSerializedByteStreamOfBeacon (StorageClsMetaBeacon lBeacon) {
@@ -74,35 +76,26 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
         return beaconSerializedBuffer;
     }
 
-    private ArrayList<StorageClsMetaBeacon> parseLayer5Beacons() {
-        ArrayList<StorageClsMetaBeacon> beaconsFound = new ArrayList();
-        while (l5parser.isHeaderAvailable(handlerBuffer, bufridx, bufwidx, logger)) {
-            if (!l5parser.isHeaderValid(handlerBuffer, bufridx, bufwidx, logger)) {
-                skipBytesTillHeader();
-                continue;
+    public ArrayList<Layer5Beacon> parseLayer5Beacons(ByteBuf byteBuf) {
+        ArrayList<Layer5Beacon> layer5Beacons = new ArrayList<>();
+        while (byteBuf.isReadable()) {
+            if (handlerBuffer.length == bufwidx) {
+                // Local buffer is totally full, so cleanup the buffer totally
+                cleanUpLocalBuffer();
             }
-            if (!l5parser.isDataSufficient(handlerBuffer, bufridx, bufwidx, logger)) {
-                break;
+            int bytesToRead = handlerBuffer.length / 4;
+            if (byteBuf.readableBytes() < bytesToRead) {
+                bytesToRead = byteBuf.readableBytes();
             }
-            Deserialized<Layer5Beacon> layer5BeaconD = l5parser.deserialize(handlerBuffer, bufridx, bufwidx, logger);
-            if (layer5BeaconD.data != null)
-            {
-                Layer5Beacon beacon = layer5BeaconD.data;
-//                Append only StorageMetaClsBeacons
-                if (beacon.getBeaconType() == 1 ) {
-                    beaconsFound.add((StorageClsMetaBeacon) beacon);
-                }
-//                Ignore other beacons
-                bufridx = layer5BeaconD.curridx;
-                adjustBuffer();
+            if ((handlerBuffer.length - bufwidx) < bytesToRead) {
+                bytesToRead = handlerBuffer.length - bufwidx;
             }
-            else // Either deserializer not found or crc check failed. Here we are just breaking the loop.
-            // Better to skip the beacon in _l5parser.deserializer
-            {
-                break;
-            }
+
+            byteBuf.readBytes(handlerBuffer, bufwidx, bytesToRead);
+            bufwidx += bytesToRead;
+            layer5Beacons.addAll(parseLayer5FromLocalBuf());
         }
-        return beaconsFound;
+        return layer5Beacons;
     }
 
     private void adjustBuffer() {
@@ -125,6 +118,58 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
             bufridx++;
         }
         adjustBuffer();
+    }
+
+    public void cleanUpLocalBuffer(){
+        bufridx = 0;
+        bufwidx = 0;
+    }
+
+    public ArrayList<Layer5Beacon> parseLayer5FromLocalBuf() {
+        ArrayList<Layer5Beacon> layer5Beacons = new ArrayList<>();
+
+        while (l5parser.isHeaderAvailable(handlerBuffer, bufridx, bufwidx, logger)) {
+            if (!l5parser.isHeaderValid(handlerBuffer, bufridx, bufwidx, logger)) {
+                skipBytesTillHeader();
+                continue;
+            }
+            if (!l5parser.isDataSufficient(handlerBuffer, bufridx, bufwidx, logger)) {
+                break;
+            }
+            Deserialized<Layer5Beacon> layer5BeaconD = l5parser.deserialize(handlerBuffer, bufridx, bufwidx, logger);
+            if (layer5BeaconD.data != null) {
+                Layer5Beacon beacon = layer5BeaconD.data;
+                layer5Beacons.add(beacon);
+                bufridx = layer5BeaconD.curridx;
+                adjustBuffer();
+            } else {
+                bufridx++;
+            }
+        }
+        return layer5Beacons;
+    }
+
+    public void handleLayer5Beacons(ArrayList<Layer5Beacon> layer5Beacons) {
+
+        for (Layer5Beacon eachBeacon : layer5Beacons) {
+            if (eachBeacon.getBeaconType() != 1) {
+                continue;
+            }
+
+            StorageClsMetaBeacon storageClsMetaBeacon = (StorageClsMetaBeacon) eachBeacon;
+            logger.info("Beacon received::" + storageClsMetaBeacon.toJsonString(logger));
+
+            // Reply back result via eventbus
+            Handler<AsyncResult<Message<StorageClsMetaPayload>>> replyCallback = new Handler<>() {
+                @Override
+                public void handle(AsyncResult<Message<StorageClsMetaPayload>> event) {
+                        // TODO : send to eventbus
+                        logger.info("Message Received from NameNode Client Handler: \n" + event.result().body().toJsonString(logger));
+                }
+            };
+
+            eventBus.request("/namenodeclienthandler", storageClsMetaBeacon.getPayload(), replyCallback);
+        }
     }
 
 }

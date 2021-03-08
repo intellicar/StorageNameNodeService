@@ -1,9 +1,12 @@
 package in.intellicar.layer5.service.namenode.utils;
 
+import in.intellicar.layer5.beacon.storagemetacls.StorageClsMetaBeacon;
+import in.intellicar.layer5.beacon.storagemetacls.payload.metaclsservice.AssociatedInstanceIdReq;
 import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.client.AccIdGenerateReq;
 import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.client.AccIdGenerateRsp;
 import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.internal.AccIdRegisterReq;
 import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.internal.AccIdRegisterRsp;
+import in.intellicar.layer5.service.namenode.client.NameNodeClient;
 import in.intellicar.layer5.utils.LittleEndianUtils;
 import in.intellicar.layer5.utils.sha.SHA256Item;
 import in.intellicar.layer5.utils.sha.SHA256Utils;
@@ -19,7 +22,6 @@ import java.util.logging.Logger;
 public class NameNodeUtils {
 
     //TODO
-
     public static Future<SHA256Item> generateAccountID(AccIdGenerateReq req, MySQLPool vertxMySQLClient, Logger logger){
         String accountName = LittleEndianUtils.printHexArray(req.accNameUtf8Bytes);
 
@@ -107,7 +109,16 @@ TODO: Client End
 1. Get InstanceId corresponding to accountName
 2. Send AccIdRegisterReq to InstanceId
 **/
-    public static Future<SHA256Item> getInstanceID(SHA256Item accountID){
+    public static Future<SHA256Item> getInstanceID(SHA256Item accountID, int seqID,  Logger logger) throws InterruptedException {
+
+        AssociatedInstanceIdReq req = new AssociatedInstanceIdReq(accountID);
+        StorageClsMetaBeacon beacon = new StorageClsMetaBeacon(seqID, req);
+
+        NameNodeClient client = new NameNodeClient("192.168.0.116", 10107, "/server/naveen/mb15", beacon, logger);
+        client.startClient();
+        Thread clientThread = new Thread(client);
+        clientThread.start();
+        clientThread.join();
         return null;
     }
 

@@ -3,32 +3,23 @@ package in.intellicar.layer5.service.namenode.client;
 import in.intellicar.layer5.beacon.Layer5Beacon;
 import in.intellicar.layer5.beacon.Layer5BeaconDeserializer;
 import in.intellicar.layer5.beacon.Layer5BeaconParser;
-import in.intellicar.layer5.beacon.storagemetacls.PayloadTypes;
 import in.intellicar.layer5.beacon.storagemetacls.StorageClsMetaBeacon;
 import in.intellicar.layer5.beacon.storagemetacls.StorageClsMetaBeaconDeser;
 import in.intellicar.layer5.beacon.storagemetacls.StorageClsMetaPayload;
-import in.intellicar.layer5.beacon.storagemetacls.payload.metaclsservice.AssociatedInstanceIdReq;
-import in.intellicar.layer5.beacon.storagemetacls.payload.metaclsservice.InstanceIdToBuckReq;
-import in.intellicar.layer5.beacon.storagemetacls.service.common.mysql.MySQLQueryHandler;
 import in.intellicar.layer5.data.Deserialized;
-import in.intellicar.layer5.utils.LittleEndianUtils;
-import in.intellicar.layer5.utils.sha.SHA256Item;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.timeout.IdleStateEvent;
-import io.vertx.core.AsyncResult;
-import io.vertx.core.Context;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.eventbus.EventBus;
 import io.vertx.core.eventbus.Message;
 
 import java.util.ArrayList;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Logger;
 
 public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> {
@@ -44,7 +35,7 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
     private static int seqId = 0;
     private ChannelHandlerContext ctx = null;
     StorageClsMetaPayload payload = null;
-    private Boolean isActive = false;
+    private AtomicBoolean isActive = new AtomicBoolean(false);
 
     public EventBus eventBus;
     public static int MAIL_ADDED = 1;
@@ -67,7 +58,7 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
         this.eventBus.consumer("/clientreqhandler", (Handler<Message<StorageClsMetaPayload>>) event -> {
             this.payload = event.body();
             this.event = event;
-            if (this.isActive) {
+            if(isActive.compareAndSet(true, false)) {
                 this.ctx.pipeline().fireUserEventTriggered(MAIL_ADDED);
             }
         });
@@ -76,7 +67,7 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
     @Override
     public void channelActive(ChannelHandlerContext ctx) throws Exception {
         super.channelActive(ctx);
-        this.isActive = true;
+        this.isActive.set(true);
         this.ctx = ctx;
         logger.info("Channel active");
         if(this.payload != null){

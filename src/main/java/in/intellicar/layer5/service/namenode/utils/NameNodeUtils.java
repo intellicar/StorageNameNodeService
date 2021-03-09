@@ -23,6 +23,7 @@ import io.vertx.sqlclient.Row;
 import io.vertx.sqlclient.RowSet;
 import io.vertx.sqlclient.Tuple;
 
+import java.nio.charset.StandardCharsets;
 import java.security.NoSuchAlgorithmException;
 import java.util.logging.Logger;
 
@@ -37,7 +38,7 @@ public class NameNodeUtils {
             return checkedAccountID;
         } else {
             String salt = Long.toHexString(System.nanoTime());
-            SHA256Item accountIDSHA = generateAccountID(req.accNameUtf8Bytes, salt.getBytes());
+            SHA256Item accountIDSHA = generateID(req.accNameUtf8Bytes, salt.getBytes());
 
             //TODO: Update db.table_name
             Future<RowSet<Row>> insertFuture = vertxMySQLClient.preparedQuery("INSERT INTO accounts.account_info (account_name, salt, account_id, ack) values (?, ?, ?, ?)")
@@ -97,7 +98,7 @@ public class NameNodeUtils {
         }
     }
 
-    public static SHA256Item generateAccountID(byte[] nameBytes, byte[] saltBytes) {
+    public static SHA256Item generateID(byte[] nameBytes, byte[] saltBytes) {
 
         byte[] saltyName = new byte[saltBytes.length + nameBytes.length];
         System.arraycopy(nameBytes, 0, saltyName, 0, nameBytes.length);

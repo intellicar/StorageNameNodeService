@@ -15,9 +15,11 @@ import in.intellicar.layer5.utils.LittleEndianUtils;
 import in.intellicar.layer5.utils.sha.SHA256Item;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.handler.timeout.IdleStateEvent;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Context;
 import io.vertx.core.Handler;
@@ -26,6 +28,7 @@ import io.vertx.core.eventbus.EventBus;
 import io.vertx.core.eventbus.Message;
 
 import java.util.ArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
 public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> {
@@ -39,9 +42,11 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
     private String serverName;
     public Message<StorageClsMetaPayload> event;
     private static int seqId = 0;
+    private ChannelHandlerContext ctx;
     StorageClsMetaPayload payload;
 
     public EventBus eventBus;
+    public static int MAIL_ADDED = 1;
 
     public NameNodeClientHandler(Layer5BeaconParser l5parser, String serverName, Vertx vertx, Logger logger){
         this.l5parser = l5parser;
@@ -54,21 +59,37 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
         Layer5BeaconDeserializer storageMetaClsAPIDeser = new StorageClsMetaBeaconDeser();
         l5parser.registerDeserializer(storageMetaClsAPIDeser.getBeaconType(), storageMetaClsAPIDeser);
 
-        this.eventBus.consumer("/clientreqhandler", new Handler<Message<StorageClsMetaPayload>>() {
-            public void handle(Message<StorageClsMetaPayload> event) {
-                NameNodeClientHandler.this.payload = event.body();
-                NameNodeClientHandler.this.event = event;
-            }
-        });
-
         handlerBuffer = new byte[16 * 1024];
         bufridx = 0;
         bufwidx = 0;
     }
 
-    public void channelActive(ChannelHandlerContext ctx) throws Exception{
-        StorageClsMetaBeacon beacon = new StorageClsMetaBeacon(seqId++, payload);;
-        ctx.writeAndFlush(Unpooled.wrappedBuffer(returnSerializedByteStreamOfBeacon(beacon)));
+    @Override
+    public void channelActive(ChannelHandlerContext ctx) throws Exception {
+        super.channelActive(ctx);
+        this.ctx = ctx;
+        logger.info("Channel active");
+
+        this.eventBus.consumer("/clientreqhandler", (Handler<Message<StorageClsMetaPayload>>) event -> {
+            this.payload = event.body();
+            this.event = event;
+            this.ctx.pipeline().fireUserEventTriggered(MAIL_ADDED);
+        });
+    }
+
+    @Override
+    public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
+        if (evt instanceof IdleStateEvent){
+            logger.info("Connection Idle Triggered");
+        }else if (evt instanceof Integer){
+            Integer action = (Integer) evt;
+            if (action == MAIL_ADDED){
+                StorageClsMetaBeacon beacon = new StorageClsMetaBeacon(seqId++, this.payload);
+                byte[] beaconRaw = new byte[beacon.getBeaconSize()];
+                l5parser.serialize(beaconRaw, 0, beaconRaw.length, beacon, logger);
+                ctx.writeAndFlush(Unpooled.wrappedBuffer(beaconRaw)).addListener((ChannelFutureListener) future -> logger.info("Socket write done"));
+            }
+        }
     }
 
     @Override

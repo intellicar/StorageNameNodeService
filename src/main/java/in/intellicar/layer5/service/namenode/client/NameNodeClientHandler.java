@@ -48,6 +48,7 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
 
     public EventBus eventBus;
     public static int MAIL_ADDED = 1;
+    private Object _lock = new Object();
 
     public NameNodeClientHandler(Layer5BeaconParser l5parser, String serverName, Vertx vertx, Logger logger){
         this.l5parser = l5parser;
@@ -65,10 +66,12 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
         bufwidx = 0;
 
         this.eventBus.consumer("/clientreqhandler", (Handler<Message<StorageClsMetaPayload>>) event -> {
-            this.payload = event.body();
-            this.event = event;
-            if (this.isActive) {
-                this.ctx.pipeline().fireUserEventTriggered(MAIL_ADDED);
+            synchronized (_lock) {
+                if (this.isActive) {
+                    this.ctx.pipeline().fireUserEventTriggered(MAIL_ADDED);
+                }
+                this.payload = event.body();
+                this.event = event;
             }
         });
     }
@@ -76,11 +79,13 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
     @Override
     public void channelActive(ChannelHandlerContext ctx) throws Exception {
         super.channelActive(ctx);
-        this.isActive = true;
         this.ctx = ctx;
-        logger.info("Channel active");
-        if(this.payload != null){
-            this.ctx.pipeline().fireUserEventTriggered(MAIL_ADDED);
+        synchronized (_lock) {
+            logger.info("Channel active");
+            if (this.payload != null) {
+                this.ctx.pipeline().fireUserEventTriggered(MAIL_ADDED);
+            }
+            this.isActive = true;
         }
     }
 
@@ -106,6 +111,7 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
         if (layer5Beacons.size() > 0){
             handleLayer5Beacons(layer5Beacons);
         }
+        ctx.close().addListener(ChannelFutureListener.CLOSE);
     }
 
     private byte[] returnSerializedByteStreamOfBeacon (StorageClsMetaBeacon lBeacon) {
@@ -194,12 +200,10 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
             if (eachBeacon.getBeaconType() != 1) {
                 continue;
             }
-
             StorageClsMetaBeacon storageClsMetaBeacon = (StorageClsMetaBeacon) eachBeacon;
             logger.info("Beacon received::" + storageClsMetaBeacon.toJsonString(logger));
             if (event!= null){
                 event.reply(storageClsMetaBeacon.payload);
-                ctx.close().addListener(ChannelFutureListener.CLOSE);
             }
         }
     }

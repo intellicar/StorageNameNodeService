@@ -95,8 +95,7 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
                 byte[] beaconRaw = new byte[beacon.getBeaconSize()];
                 l5parser.serialize(beaconRaw, 0, beaconRaw.length, beacon, logger);
                 ctx.writeAndFlush(Unpooled.wrappedBuffer(beaconRaw))
-                        .addListener((ChannelFutureListener) future -> logger.info("Socket write done"))
-                        .addListener(ChannelFutureListener.CLOSE);
+                        .addListener((ChannelFutureListener) future -> logger.info("Socket write done"));
             }
         }
     }
@@ -200,6 +199,7 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
             logger.info("Beacon received::" + storageClsMetaBeacon.toJsonString(logger));
             if (event!= null){
                 event.reply(storageClsMetaBeacon.payload);
+                ctx.close().addListener(ChannelFutureListener.CLOSE);
             }
         }
     }

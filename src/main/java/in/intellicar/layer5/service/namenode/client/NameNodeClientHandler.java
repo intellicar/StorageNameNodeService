@@ -45,8 +45,6 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
     private ChannelHandlerContext ctx = null;
     StorageClsMetaPayload payload = null;
     private Boolean isActive = false;
-    private Boolean eventTriggered = false;
-
 
     public EventBus eventBus;
     public static int MAIL_ADDED = 1;
@@ -67,7 +65,6 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
         bufwidx = 0;
 
         this.eventBus.consumer("/clientreqhandler", (Handler<Message<StorageClsMetaPayload>>) event -> {
-            this.eventTriggered = true;
             this.payload = event.body();
             this.event = event;
             if (this.isActive) {
@@ -82,7 +79,7 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
         this.isActive = true;
         this.ctx = ctx;
         logger.info("Channel active");
-        if(this.eventTriggered){
+        if(this.payload != null){
             this.ctx.pipeline().fireUserEventTriggered(MAIL_ADDED);
         }
     }

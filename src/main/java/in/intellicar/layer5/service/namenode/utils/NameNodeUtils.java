@@ -6,6 +6,8 @@ import in.intellicar.layer5.beacon.storagemetacls.payload.metaclsservice.Associa
 import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.client.*;
 import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.internal.AccIdRegisterReq;
 import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.internal.AccIdRegisterRsp;
+import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.internal.NsIdRegisterReq;
+import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.internal.NsIdRegisterRsp;
 import in.intellicar.layer5.service.namenode.client.NameNodeClient;
 import in.intellicar.layer5.utils.LittleEndianUtils;
 import in.intellicar.layer5.utils.sha.SHA256Item;
@@ -27,126 +29,7 @@ import java.util.logging.Logger;
 
 public class NameNodeUtils {
 
-    //TODO
-    public static Future<SHA256Item> getAccountID(AccIdGenerateReq req, Vertx lVertx, MySQLPool vertxMySQLClient, Logger logger){
-        String accountName = LittleEndianUtils.printHexArray(req.accNameUtf8Bytes);
-
-        Future<SHA256Item> checkedAccountID = checkAccountID(accountName, vertxMySQLClient, logger);
-        if (checkedAccountID.succeeded()) {
-            return checkedAccountID;
-        } else {
-            String salt = Long.toHexString(System.nanoTime());
-            SHA256Item accountIDSHA = generateAccountId(req.accNameUtf8Bytes, salt.getBytes());
-
-            //TODO: Update db.table_name
-            Future<RowSet<Row>> insertFuture = vertxMySQLClient.preparedQuery("INSERT INTO accounts.account_info (account_name, salt, account_id, ack) values (?, ?, ?, ?)")
-                    .execute(Tuple.of(accountName, salt, accountIDSHA.toHex(), 0));
-
-            while (true) {
-                synchronized (insertFuture) {
-
-                    try {
-                        insertFuture.wait(500);
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
-                    }
-                }
-                if (insertFuture.succeeded()) {
-                    AssociatedInstanceIdRsp instanceIdRsp = getInstanceID(lVertx, accountIDSHA, logger);
-                    AccIdRegisterRsp accIdRegisterRsp = sendRegisterAccountIdRequest(instanceIdRsp, accountIDSHA, accountName, salt, lVertx, logger);
-                    return Future.succeededFuture(accountIDSHA);
-                } else {
-                    return Future.failedFuture(insertFuture.cause());
-                }
-            }
-        }
-    }
-
-    public static AccIdRegisterRsp sendRegisterAccountIdRequest(AssociatedInstanceIdRsp lInstanceIdRsp, SHA256Item lAccId, String lAccName, String lSalt, Vertx lVertx, Logger lLogger)
-    {
-        AccIdRegisterReq accIdRegReq = new AccIdRegisterReq(lAccId, lAccName.getBytes(StandardCharsets.UTF_8), lSalt.getBytes(StandardCharsets.UTF_8));
-        byte[] ipBytes = lInstanceIdRsp.ip;
-
-        String ipString = Integer.toString(((int)ipBytes[0])) + "." + Integer.toString(((int)ipBytes[1])) + "." +
-                                Integer.toString(((int)ipBytes[2])) + "." + Integer.toString(((int)ipBytes[3]));
-        NameNodeClient client = new NameNodeClient(ipString, lInstanceIdRsp.port, lVertx, lLogger);
-        client.startClient();
-        Thread clientThread = new Thread(client);
-        clientThread.start();
-        try {
-            clientThread.join();
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-
-        EventBus eventBus = lVertx.eventBus();
-        Future<Message<StorageClsMetaPayload>> future = eventBus.request("clientreqhandler", accIdRegReq);
-
-        while (true) {
-            synchronized (future) {
-
-                try {
-                    future.wait(500);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-            }
-            if (future.succeeded()) {
-                return (AccIdRegisterRsp) future.result().body();
-            } else {
-                Throwable cause = future.cause();;
-                if(cause != null)
-                    lLogger.info("getInstanceId failed with error: " + cause.getMessage());
-                else
-                    lLogger.info("getInstanceID failed");
-                return null;
-            }
-        }
-    }
-
-    //TODO
-    public static Future<AccIdRegisterRsp> registerAccountID(AccIdRegisterReq req,  MySQLPool vertxMySQLClient, Logger logger){
-        return null;
-    }
-
-
     // Utility Functions
-    public static Future<SHA256Item> checkAccountID(String accountName, MySQLPool vertxMySQLClient, Logger logger) {
-
-        //TODO update db.table_name
-        String sql = "SELECT account_id from accounts.account_info where account_name = '" + accountName + "'";
-        Future<RowSet<Row>> future = vertxMySQLClient
-                .query(sql)
-                .execute();
-        while (true) {
-            synchronized (future) {
-
-                try {
-                    future.wait(500);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-            }
-            if (future.isComplete()) {
-                RowSet<Row> rows = future.result();
-                if (rows != null && rows.size() > 0) {
-                    String hexID = rows.iterator().next().getString("account_id"); // TODO update column name
-                    SHA256Item accountIDSHA = new SHA256Item(LittleEndianUtils.hexStringToByteArray(hexID));
-                    return Future.succeededFuture(accountIDSHA);
-                } else {
-                    return Future.failedFuture(future.cause());
-                }
-            }
-        }
-    }
-
-    public static SHA256Item generateAccountId(byte[] nameBytes, byte[] saltBytes) {
-
-        ArrayList<byte[]> pathArray = new ArrayList<>();
-        pathArray.add(nameBytes);
-        return generateIdForPath(pathArray, saltBytes);
-    }
-
     /*
     TODO: Client End
     1. Get InstanceId corresponding to accountName
@@ -202,6 +85,134 @@ public class NameNodeUtils {
         }
     }
 
+    public static Future<SHA256Item> checkAccountID(String accountName, MySQLPool vertxMySQLClient, Logger logger) {
+
+        //TODO update db.table_name
+        String sql = "SELECT account_id from accounts.account_info where account_name = '" + accountName + "'";
+        Future<RowSet<Row>> future = vertxMySQLClient
+                .query(sql)
+                .execute();
+        while (true) {
+            synchronized (future) {
+
+                try {
+                    future.wait(500);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+            if (future.isComplete()) {
+                RowSet<Row> rows = future.result();
+                if (rows != null && rows.size() > 0) {
+                    String hexID = rows.iterator().next().getString("account_id"); // TODO update column name
+                    SHA256Item accountIDSHA = new SHA256Item(LittleEndianUtils.hexStringToByteArray(hexID));
+                    return Future.succeededFuture(accountIDSHA);
+                } else {
+                    return Future.failedFuture(future.cause());
+                }
+            }
+        }
+    }
+
+    public static SHA256Item generateAccountId(byte[] nameBytes, byte[] saltBytes) {
+
+        ArrayList<byte[]> pathArray = new ArrayList<>();
+        pathArray.add(nameBytes);
+        return generateIdForPath(pathArray, saltBytes);
+    }
+
+    public static AccIdRegisterRsp sendRegisterAccountIdRequest(AssociatedInstanceIdRsp lInstanceIdRsp, SHA256Item lAccId, String lAccName, String lSalt, Vertx lVertx, Logger lLogger)
+    {
+        AccIdRegisterReq accIdRegReq = new AccIdRegisterReq(lAccId, lAccName.getBytes(StandardCharsets.UTF_8), lSalt.getBytes(StandardCharsets.UTF_8));
+        byte[] ipBytes = lInstanceIdRsp.ip;
+
+        String ipString = Integer.toString(((int)ipBytes[0])) + "." + Integer.toString(((int)ipBytes[1])) + "." +
+                Integer.toString(((int)ipBytes[2])) + "." + Integer.toString(((int)ipBytes[3]));
+        NameNodeClient client = new NameNodeClient(ipString, lInstanceIdRsp.port, lVertx, lLogger);
+        client.startClient();
+        Thread clientThread = new Thread(client);
+        clientThread.start();
+        try {
+            Thread.sleep(1000);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        EventBus eventBus = lVertx.eventBus();
+        Future<Message<StorageClsMetaPayload>> future = eventBus.request("/clientreqhandler", accIdRegReq);
+
+        while (true) {
+            synchronized (future) {
+
+                try {
+                    future.wait(500);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+            if (future.succeeded()) {
+                try {
+                    clientThread.join();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                return (AccIdRegisterRsp) future.result().body();
+            } else {
+                try {
+                    clientThread.join();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                Throwable cause = future.cause();;
+                if(cause != null)
+                    lLogger.info("getInstanceId failed with error: " + cause.getMessage());
+                else
+                    lLogger.info("getInstanceID failed");
+                return null;
+            }
+        }
+    }
+
+    public static Future<SHA256Item> getAccountID(AccIdGenerateReq req, Vertx lVertx, MySQLPool vertxMySQLClient, Logger logger){
+        String accountName = LittleEndianUtils.printHexArray(req.accNameUtf8Bytes);
+
+        Future<SHA256Item> checkedAccountID = checkAccountID(accountName, vertxMySQLClient, logger);
+        if (checkedAccountID.succeeded()) {
+            return checkedAccountID;
+        } else {
+            String salt = Long.toHexString(System.nanoTime());
+            SHA256Item accountIDSHA = generateAccountId(req.accNameUtf8Bytes, salt.getBytes());
+
+            //TODO: Update db.table_name
+            Future<RowSet<Row>> insertFuture = vertxMySQLClient.preparedQuery("INSERT INTO accounts.account_info (account_name, salt, account_id, ack) values (?, ?, ?, ?)")
+                    .execute(Tuple.of(accountName, salt, accountIDSHA.toHex(), 0));
+
+            while (true) {
+                synchronized (insertFuture) {
+
+                    try {
+                        insertFuture.wait(500);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+                if (insertFuture.succeeded()) {
+                    AssociatedInstanceIdRsp instanceIdRsp = getInstanceID(lVertx, accountIDSHA, logger);
+                    AccIdRegisterRsp accIdRegisterRsp = sendRegisterAccountIdRequest(instanceIdRsp, accountIDSHA, accountName, salt, lVertx, logger);
+                    return Future.succeededFuture(accountIDSHA);
+                } else {
+                    return Future.failedFuture(insertFuture.cause());
+                }
+            }
+        }
+    }
+
+    //TODO
+    public static Future<AccIdRegisterRsp> registerAccountID(AccIdRegisterReq req,  MySQLPool vertxMySQLClient, Logger logger){
+        return null;
+    }
+
+
     public static Future<Integer> getAck() {
         return Future.succeededFuture(1);
     }
@@ -241,6 +252,58 @@ public class NameNodeUtils {
         return generateIdForPath(pathArray, salt);
     }
 
+    public static NsIdRegisterRsp sendRegisterNsIdRequest(AssociatedInstanceIdRsp lInstanceIdRsp, SHA256Item lNsId, SHA256Item lAccId, String lNsName, String lSalt, Vertx lVertx, Logger lLogger)
+    {
+        NsIdRegisterReq nsIdRegReq = new NsIdRegisterReq(lNsId, lAccId, lNsName.getBytes(StandardCharsets.UTF_8), lSalt.getBytes(StandardCharsets.UTF_8));
+        byte[] ipBytes = lInstanceIdRsp.ip;
+
+        String ipString = Integer.toString(((int)ipBytes[0])) + "." + Integer.toString(((int)ipBytes[1])) + "." +
+                Integer.toString(((int)ipBytes[2])) + "." + Integer.toString(((int)ipBytes[3]));
+        NameNodeClient client = new NameNodeClient(ipString, lInstanceIdRsp.port, lVertx, lLogger);
+        client.startClient();
+        Thread clientThread = new Thread(client);
+        clientThread.start();
+        try {
+            Thread.sleep(1000);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        EventBus eventBus = lVertx.eventBus();
+        Future<Message<StorageClsMetaPayload>> future = eventBus.request("/clientreqhandler", nsIdRegReq);
+
+        while (true) {
+            synchronized (future) {
+
+                try {
+                    future.wait(500);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+            if (future.succeeded()) {
+                try {
+                    clientThread.join();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                return (NsIdRegisterRsp) future.result().body();
+            } else {
+                try {
+                    clientThread.join();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                Throwable cause = future.cause();;
+                if(cause != null)
+                    lLogger.info("getInstanceId failed with error: " + cause.getMessage());
+                else
+                    lLogger.info("getInstanceID failed");
+                return null;
+            }
+        }
+    }
+
     public static Future<SHA256Item> getNamespaceId(NsIdGenerateReq lReq, Vertx lVertx, MySQLPool lVertxMySQLClient, Logger lLogger) {
         Future<SHA256Item> existingNsIdFuture = checkNamespaceId(lReq, lVertxMySQLClient, lLogger);
         if (existingNsIdFuture.succeeded()) {
@@ -262,6 +325,8 @@ public class NameNodeUtils {
                     }
                 }
                 if (insertFuture.succeeded()) {
+                    AssociatedInstanceIdRsp instanceIdRsp = getInstanceID(lVertx, namespaceID, lLogger);
+                    NsIdRegisterRsp nsIdRegisterRsp = sendRegisterNsIdRequest(instanceIdRsp, namespaceID, lReq.accountID, namespaceName, salt, lVertx, lLogger);
                     return Future.succeededFuture(namespaceID);
                 } else {
                     return Future.failedFuture(insertFuture.cause());

@@ -6,6 +6,8 @@ import in.intellicar.layer5.beacon.storagemetacls.payload.StorageClsMetaErrorRsp
 import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.client.*;
 import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.internal.AccIdRegisterReq;
 import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.internal.AccIdRegisterRsp;
+import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.internal.NsIdRegisterReq;
+import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.internal.NsIdRegisterRsp;
 import in.intellicar.layer5.beacon.storagemetacls.service.common.IPayloadRequestHandler;
 import in.intellicar.layer5.service.namenode.utils.NameNodeUtils;
 import in.intellicar.layer5.utils.sha.SHA256Item;
@@ -43,24 +45,28 @@ public class NameNodePayloadHandler implements IPayloadRequestHandler {
                     return new StorageClsMetaErrorRsp(accountIDFuture.cause().getLocalizedMessage(), lRequestPayload);
                 }
             case ACCOUNT_ID_REG_REQ:
-                Future<AccIdRegisterRsp> ack = NameNodeUtils.registerAccountID((AccIdRegisterReq) lRequestPayload, lVertxMySQLClient, lLogger);
-                if (ack.succeeded()) {
-                    return ack.result();
+                Future<AccIdRegisterRsp> accIdRegRspFuture = NameNodeUtils.registerAccountID((AccIdRegisterReq) lRequestPayload, lVertxMySQLClient, lLogger);
+                if (accIdRegRspFuture.succeeded()) {
+                    return accIdRegRspFuture.result();
                 } else {
-                    return new StorageClsMetaErrorRsp(ack.cause().getLocalizedMessage(), lRequestPayload);
+                    return new StorageClsMetaErrorRsp(accIdRegRspFuture.cause().getLocalizedMessage(), lRequestPayload);
                 }
             case NS_ID_GEN_REQ:
                 Future<SHA256Item> nsIdFuture = NameNodeUtils.getNamespaceId((NsIdGenerateReq) lRequestPayload, _vertx, lVertxMySQLClient, lLogger);
                 if(nsIdFuture.isComplete() && nsIdFuture.succeeded())
                 {
                     SHA256Item nsId = nsIdFuture.result();
-                    //TODO:: now it acts as client and need to communicate with zookeeper and other server instance, before sending the response
                     return new NsIdGenerateRsp((NsIdGenerateReq) lRequestPayload, nsId);
                 }
                 return new StorageClsMetaErrorRsp(nsIdFuture.cause().getMessage(), lRequestPayload);
 
             case NS_ID_REG_REQ:
-                break;
+                Future<NsIdRegisterRsp> nsIdRegRspFuture = NameNodeUtils.registerNsId((NsIdRegisterReq) lRequestPayload, lVertxMySQLClient, lLogger);
+                if (nsIdRegRspFuture.succeeded()) {
+                    return nsIdRegRspFuture.result();
+                } else {
+                    return new StorageClsMetaErrorRsp(nsIdRegRspFuture.cause().getLocalizedMessage(), lRequestPayload);
+                }
             case DIR_ID_GEN_REG_REQ:
                 Future<SHA256Item> dirIdFuture = NameNodeUtils.getDirId((DirIdGenerateAndRegisterReq) lRequestPayload, lVertxMySQLClient, lLogger);
                 if(dirIdFuture.isComplete() && dirIdFuture.succeeded())
@@ -89,6 +95,5 @@ public class NameNodePayloadHandler implements IPayloadRequestHandler {
             default:
                 return new StorageClsMetaErrorRsp("Sent Unknown PayloadType",  lRequestPayload);
         }
-        return null;
     }
 }

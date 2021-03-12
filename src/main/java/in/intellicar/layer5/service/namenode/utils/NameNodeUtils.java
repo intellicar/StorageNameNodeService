@@ -13,6 +13,7 @@ import in.intellicar.layer5.utils.LittleEndianUtils;
 import in.intellicar.layer5.utils.sha.SHA256Item;
 import in.intellicar.layer5.utils.sha.SHA256Utils;
 import io.vertx.core.Future;
+import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.eventbus.EventBus;
 import io.vertx.core.eventbus.Message;
@@ -42,6 +43,19 @@ public class NameNodeUtils {
                     Byte.toUnsignedInt(lIpBytes[2]) + "." + Byte.toUnsignedInt(lIpBytes[3]);;
         return ipString;
     }
+
+    private static Thread setUpAndStartClient(String lIpString, int lPort, Vertx lVertx, String lConsumerName, Logger lLogger)
+    {
+        NameNodeClient client = new NameNodeClient(lIpString, lPort, lVertx, null, lLogger);
+        Thread clientThread = new Thread(client);
+        AssociatedInstanceIdRsp returnValue = null;
+        EventBus eventBus = lVertx.eventBus();
+        eventBus.consumer(lConsumerName, (Handler<Message<StorageClsMetaPayload>>) event -> {
+            client.setEvent(event);
+            clientThread.start();
+        });
+        return clientThread;
+    }
     /*
     TODO: Client End
     1. Get InstanceId corresponding to accountName
@@ -52,22 +66,16 @@ public class NameNodeUtils {
         AssociatedInstanceIdReq req = new AssociatedInstanceIdReq(lIdToBeMatched);
         //StorageClsMetaBeacon beacon = new StorageClsMetaBeacon(seqID, req);
         String consumerName = CONSUMER_NAME_PREFIX + _consumerAddressSuffix.getAndIncrement();
+        AssociatedInstanceIdRsp returnValue = null;
 
-        NameNodeClient client = new NameNodeClient(ZOOKEEPER_IP, ZOOKEEPER_PORT, lVertx, consumerName, logger);
-        Thread clientThread = new Thread(client);
-        clientThread.start();
-        AssociatedInstanceIdRsp resultValue = null;
-        try {
-            Thread.sleep(5000);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
+        Thread clientThread = setUpAndStartClient(ZOOKEEPER_IP, ZOOKEEPER_PORT, lVertx, consumerName, logger);
 
         EventBus eventBus = lVertx.eventBus();
         Future<Message<StorageClsMetaPayload>> future = eventBus.request(consumerName, req);
+
         doWaitOnFuture(future);
         if (future.succeeded()) {
-            resultValue = (AssociatedInstanceIdRsp) future.result().body();
+            returnValue = (AssociatedInstanceIdRsp) future.result().body();
         } else {
             Throwable cause = future.cause();
             ;
@@ -75,14 +83,14 @@ public class NameNodeUtils {
                 logger.info("getInstanceId failed with error: " + cause.getMessage());
             else
                 logger.info("getInstanceID failed");
-            resultValue = null;
+            returnValue = null;
         }
         try {
             clientThread.join();
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
-        return resultValue;
+        return returnValue;
     }
 
     private static <T> void doWaitOnFuture(Future<T> lFuture)
@@ -169,16 +177,9 @@ public class NameNodeUtils {
         AccIdRegisterReq accIdRegReq = new AccIdRegisterReq(lAccId, lAccName.getBytes(StandardCharsets.UTF_8), lSalt.getBytes(StandardCharsets.UTF_8));
         String ipString = getIpFromBytes(lInstanceIdRsp.ip);
         String consumerName = CONSUMER_NAME_PREFIX + _consumerAddressSuffix.getAndIncrement();
-
-        NameNodeClient client = new NameNodeClient(ipString, lInstanceIdRsp.port, lVertx, consumerName, lLogger);
-        Thread clientThread = new Thread(client);
-        clientThread.start();
         AccIdRegisterRsp returnValue = null;
-        try {
-            Thread.sleep(5000);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
+
+        Thread clientThread = setUpAndStartClient(ipString, lInstanceIdRsp.port, lVertx, consumerName, lLogger);
 
         EventBus eventBus = lVertx.eventBus();
         Future<Message<StorageClsMetaPayload>> future = eventBus.request(consumerName, accIdRegReq);
@@ -293,17 +294,9 @@ public class NameNodeUtils {
         NsIdRegisterReq nsIdRegReq = new NsIdRegisterReq(lNsId, lAccId, lNsName.getBytes(StandardCharsets.UTF_8), lSalt.getBytes(StandardCharsets.UTF_8));
         String ipString = getIpFromBytes(lInstanceIdRsp.ip);
         String consumerName = CONSUMER_NAME_PREFIX + _consumerAddressSuffix.getAndIncrement();
-
-        NameNodeClient client = new NameNodeClient(ipString, lInstanceIdRsp.port, lVertx, consumerName, lLogger);
-        client.startClient();
-        Thread clientThread = new Thread(client);
-        clientThread.start();
         NsIdRegisterRsp returnValue = null;
-        try {
-            Thread.sleep(1000);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
+
+        Thread clientThread = setUpAndStartClient(ipString, lInstanceIdRsp.port, lVertx, consumerName, lLogger);
 
         EventBus eventBus = lVertx.eventBus();
         Future<Message<StorageClsMetaPayload>> future = eventBus.request(consumerName, nsIdRegReq);

@@ -3,32 +3,21 @@ package in.intellicar.layer5.service.namenode.client;
 import in.intellicar.layer5.beacon.Layer5Beacon;
 import in.intellicar.layer5.beacon.Layer5BeaconDeserializer;
 import in.intellicar.layer5.beacon.Layer5BeaconParser;
-import in.intellicar.layer5.beacon.storagemetacls.PayloadTypes;
 import in.intellicar.layer5.beacon.storagemetacls.StorageClsMetaBeacon;
 import in.intellicar.layer5.beacon.storagemetacls.StorageClsMetaBeaconDeser;
 import in.intellicar.layer5.beacon.storagemetacls.StorageClsMetaPayload;
-import in.intellicar.layer5.beacon.storagemetacls.payload.metaclsservice.AssociatedInstanceIdReq;
-import in.intellicar.layer5.beacon.storagemetacls.payload.metaclsservice.InstanceIdToBuckReq;
-import in.intellicar.layer5.beacon.storagemetacls.service.common.mysql.MySQLQueryHandler;
 import in.intellicar.layer5.data.Deserialized;
-import in.intellicar.layer5.utils.LittleEndianUtils;
-import in.intellicar.layer5.utils.sha.SHA256Item;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.timeout.IdleStateEvent;
-import io.vertx.core.AsyncResult;
-import io.vertx.core.Context;
-import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.eventbus.EventBus;
 import io.vertx.core.eventbus.Message;
 
 import java.util.ArrayList;
-import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
 public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> {
@@ -39,7 +28,6 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
     private byte[] handlerBuffer;
     private int bufridx;
     private int bufwidx;
-    public Message<StorageClsMetaPayload> event = null;
     private static int seqId = 0;
     private ChannelHandlerContext ctx = null;
     StorageClsMetaPayload payload = null;
@@ -48,13 +36,14 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
     public EventBus eventBus;
     public static int MAIL_ADDED = 1;
     private Object _lock = new Object();
-    private String _consumerName;
+    private Message<StorageClsMetaPayload> _event;
 
-    public NameNodeClientHandler(Layer5BeaconParser l5parser, Vertx vertx, String lConsumerName, Logger logger){
+    public NameNodeClientHandler(Layer5BeaconParser l5parser, Vertx vertx, Message<StorageClsMetaPayload> lEvent, Logger logger){
         this.l5parser = l5parser;
         this.vertx = vertx;
         this.logger = logger;
-        _consumerName = lConsumerName;
+        _event = lEvent;
+        payload = _event.body();
 
         this.eventBus = vertx.eventBus();
 
@@ -64,46 +53,30 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
         handlerBuffer = new byte[16 * 1024];
         bufridx = 0;
         bufwidx = 0;
-
-        this.eventBus.consumer(_consumerName, (Handler<Message<StorageClsMetaPayload>>) event -> {
-            synchronized (_lock) {
-                if (this.isActive) {
-                    //synchronized (ctx) {//not helpful in dealing with exception
-                        this.ctx.pipeline().fireUserEventTriggered(MAIL_ADDED);
-                    //}
-                }
-                this.payload = event.body();
-                this.event = event;
-            }
-        });
     }
 
     @Override
     public void channelActive(ChannelHandlerContext ctx) throws Exception {
         super.channelActive(ctx);
         this.ctx = ctx;
-        synchronized (_lock) {
-            logger.info("Channel active");
-            if (this.payload != null) {
-                this.ctx.pipeline().fireUserEventTriggered(MAIL_ADDED);
-            }
-            this.isActive = true;
-        }
+        StorageClsMetaBeacon beacon = new StorageClsMetaBeacon(seqId++, this.payload);
+        ctx.writeAndFlush(Unpooled.wrappedBuffer(getSerializedByteStream(beacon)))
+                .addListener((ChannelFutureListener) future -> logger.info("Socket write done"));
     }
 
-    @Override
-    public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
-        if (evt instanceof IdleStateEvent){
-            logger.info("Connection Idle Triggered");
-        }else if (evt instanceof Integer){
-            Integer action = (Integer) evt;
-            if (action == MAIL_ADDED){
-                StorageClsMetaBeacon beacon = new StorageClsMetaBeacon(seqId++, this.payload);
-                ctx.writeAndFlush(Unpooled.wrappedBuffer(getSerializedByteStream(beacon)))
-                        .addListener((ChannelFutureListener) future -> logger.info("Socket write done"));
-            }
-        }
-    }
+//    @Override
+//    public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
+//        if (evt instanceof IdleStateEvent){
+//            logger.info("Connection Idle Triggered");
+//        }else if (evt instanceof Integer){
+//            Integer action = (Integer) evt;
+//            if (action == MAIL_ADDED){
+//                StorageClsMetaBeacon beacon = new StorageClsMetaBeacon(seqId++, this.payload);
+//                ctx.writeAndFlush(Unpooled.wrappedBuffer(getSerializedByteStream(beacon)))
+//                        .addListener((ChannelFutureListener) future -> logger.info("Socket write done"));
+//            }
+//        }
+//    }
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, ByteBuf msg) throws Exception {
@@ -202,8 +175,8 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
             }
             StorageClsMetaBeacon storageClsMetaBeacon = (StorageClsMetaBeacon) eachBeacon;
             logger.info("Beacon received::" + storageClsMetaBeacon.toJsonString(logger));
-            if (event!= null){
-                event.reply(storageClsMetaBeacon.payload);
+            if (_event!= null){
+                _event.reply(storageClsMetaBeacon.payload);
             }
         }
     }

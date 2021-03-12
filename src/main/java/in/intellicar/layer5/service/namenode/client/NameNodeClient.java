@@ -1,6 +1,6 @@
 package in.intellicar.layer5.service.namenode.client;
 
-import in.intellicar.layer5.beacon.storagemetacls.StorageClsMetaBeacon;
+import in.intellicar.layer5.beacon.storagemetacls.StorageClsMetaPayload;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelOption;
@@ -8,6 +8,7 @@ import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.vertx.core.Vertx;
+import io.vertx.core.eventbus.Message;
 
 import java.util.logging.Logger;
 
@@ -20,14 +21,14 @@ public class NameNodeClient implements Runnable{
 
     private ChannelFuture channelFuture;
     private Thread clientThread;
-    private String _consumerName;
+    private Message<StorageClsMetaPayload> _event;
 
-    public NameNodeClient(String host, int port, Vertx vertx, String lConsumerName, Logger logger) {
+    public NameNodeClient(String host, int port, Vertx vertx, Message<StorageClsMetaPayload> lEvent, Logger logger) {
         this.logger = logger;
         this.host = host;
         this.port = port;
         this.vertx = vertx;
-        _consumerName = lConsumerName;
+        _event = lEvent;
         this.channelFuture = null;
         this.clientThread = null;
     }
@@ -42,6 +43,11 @@ public class NameNodeClient implements Runnable{
         clientThread.join();
     }
 
+    public void setEvent(Message<StorageClsMetaPayload> lEvent)
+    {
+        _event = lEvent;
+    }
+
     @Override
     public void run() {
         EventLoopGroup workerGroup = new NioEventLoopGroup();
@@ -50,7 +56,7 @@ public class NameNodeClient implements Runnable{
             b.group(workerGroup);
             b.channel(NioSocketChannel.class);
             b.option(ChannelOption.SO_KEEPALIVE, true);
-            b.handler(new NameNodeClientInitializer(vertx, _consumerName, logger));
+            b.handler(new NameNodeClientInitializer(vertx, _event, logger));
 
             channelFuture = b.connect(host, port).sync();
 

@@ -48,11 +48,13 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
     public EventBus eventBus;
     public static int MAIL_ADDED = 1;
     private Object _lock = new Object();
+    private String _consumerName;
 
-    public NameNodeClientHandler(Layer5BeaconParser l5parser, Vertx vertx, Logger logger){
+    public NameNodeClientHandler(Layer5BeaconParser l5parser, Vertx vertx, String lConsumerName, Logger logger){
         this.l5parser = l5parser;
         this.vertx = vertx;
         this.logger = logger;
+        _consumerName = lConsumerName;
 
         this.eventBus = vertx.eventBus();
 
@@ -63,10 +65,12 @@ public class NameNodeClientHandler extends SimpleChannelInboundHandler<ByteBuf> 
         bufridx = 0;
         bufwidx = 0;
 
-        this.eventBus.consumer("/clientreqhandler", (Handler<Message<StorageClsMetaPayload>>) event -> {
+        this.eventBus.consumer(_consumerName, (Handler<Message<StorageClsMetaPayload>>) event -> {
             synchronized (_lock) {
                 if (this.isActive) {
-                    this.ctx.pipeline().fireUserEventTriggered(MAIL_ADDED);
+                    //synchronized (ctx) {//not helpful in dealing with exception
+                        this.ctx.pipeline().fireUserEventTriggered(MAIL_ADDED);
+                    //}
                 }
                 this.payload = event.body();
                 this.event = event;

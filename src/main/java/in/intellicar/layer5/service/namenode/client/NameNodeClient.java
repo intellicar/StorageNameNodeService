@@ -20,12 +20,14 @@ public class NameNodeClient implements Runnable{
 
     private ChannelFuture channelFuture;
     private Thread clientThread;
+    private String _consumerName;
 
-    public NameNodeClient(String host, int port, Vertx vertx, Logger logger) {
+    public NameNodeClient(String host, int port, Vertx vertx, String lConsumerName, Logger logger) {
         this.logger = logger;
         this.host = host;
         this.port = port;
         this.vertx = vertx;
+        _consumerName = lConsumerName;
         this.channelFuture = null;
         this.clientThread = null;
     }
@@ -48,7 +50,7 @@ public class NameNodeClient implements Runnable{
             b.group(workerGroup);
             b.channel(NioSocketChannel.class);
             b.option(ChannelOption.SO_KEEPALIVE, true);
-            b.handler(new NameNodeClientInitializer(vertx, logger));
+            b.handler(new NameNodeClientInitializer(vertx, _consumerName, logger));
 
             channelFuture = b.connect(host, port).sync();
 

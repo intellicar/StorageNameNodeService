@@ -12,16 +12,18 @@ import java.util.logging.Logger;
 public class NameNodeClientInitializer extends ChannelInitializer<SocketChannel>  {
     private Vertx vertx;
     private Logger logger;
+    private String _consumerName;
 
-    public NameNodeClientInitializer(Vertx lVertx, Logger lLogger) {
+    public NameNodeClientInitializer(Vertx lVertx, String lConsumerName, Logger lLogger) {
         this.logger = lLogger;
         this.vertx = lVertx;
+        _consumerName = lConsumerName;
     }
 
     @Override
     protected void initChannel(SocketChannel socketChannel) throws Exception {
         ChannelPipeline pipeline = socketChannel.pipeline();
         pipeline.addLast("client handler", new NameNodeClientHandler(Layer5BeaconParser.getHandler("ClientInit", logger),
-                vertx, logger));
+                vertx, _consumerName, logger));
     }
 }

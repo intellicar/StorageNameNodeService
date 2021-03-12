@@ -25,10 +25,14 @@ import java.nio.charset.StandardCharsets;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
 
 public class NameNodeUtils {
-
+    private static AtomicInteger _consumerAddressSuffix = new AtomicInteger(0);
+    private static final String CONSUMER_NAME_PREFIX = "/clientreqhandler";
+    private static final String ZOOKEEPER_IP = "localhost";
+    private static final int ZOOKEEPER_PORT = 10107;
     // Utility Functions
     /*
     TODO: Client End
@@ -39,8 +43,9 @@ public class NameNodeUtils {
 
         AssociatedInstanceIdReq req = new AssociatedInstanceIdReq(lIdToBeMatched);
         //StorageClsMetaBeacon beacon = new StorageClsMetaBeacon(seqID, req);
+        String consumerName = CONSUMER_NAME_PREFIX + _consumerAddressSuffix.getAndIncrement();
 
-        NameNodeClient client = new NameNodeClient("localhost", 10107, lVertx, logger);
+        NameNodeClient client = new NameNodeClient(ZOOKEEPER_IP, ZOOKEEPER_PORT, lVertx, consumerName, logger);
         Thread clientThread = new Thread(client);
         clientThread.start();
         AssociatedInstanceIdRsp resultValue = null;
@@ -51,7 +56,7 @@ public class NameNodeUtils {
         }
 
         EventBus eventBus = lVertx.eventBus();
-        Future<Message<StorageClsMetaPayload>> future = eventBus.request("/clientreqhandler", req);
+        Future<Message<StorageClsMetaPayload>> future = eventBus.request(consumerName, req);
         doWaitOnFuture(future);
         if (future.succeeded()) {
             resultValue = (AssociatedInstanceIdRsp) future.result().body();
@@ -158,10 +163,9 @@ public class NameNodeUtils {
 
         String ipString = Byte.toUnsignedInt(ipBytes[0]) + "." + Byte.toUnsignedInt(ipBytes[1]) + "." +
                 Byte.toUnsignedInt(ipBytes[2]) + "." + Byte.toUnsignedInt(ipBytes[3]);
-        System.out.println("Port: " + lInstanceIdRsp.port);
-        System.out.println("Host: " + ipString);
 
-        NameNodeClient client = new NameNodeClient(ipString, lInstanceIdRsp.port, lVertx, lLogger);
+        String consumerName = CONSUMER_NAME_PREFIX + _consumerAddressSuffix.getAndIncrement();
+        NameNodeClient client = new NameNodeClient(ipString, lInstanceIdRsp.port, lVertx, consumerName, lLogger);
         Thread clientThread = new Thread(client);
         clientThread.start();
         AccIdRegisterRsp returnValue = null;
@@ -172,7 +176,7 @@ public class NameNodeUtils {
         }
 
         EventBus eventBus = lVertx.eventBus();
-        Future<Message<StorageClsMetaPayload>> future = eventBus.request("/clientreqhandler", accIdRegReq);
+        Future<Message<StorageClsMetaPayload>> future = eventBus.request(consumerName, accIdRegReq);
 
         doWaitOnFuture(future);
         if (future.succeeded()) {
@@ -212,7 +216,7 @@ public class NameNodeUtils {
     public static Future<SHA256Item> getAccountID(AccIdGenerateReq req, Vertx lVertx, MySQLPool vertxMySQLClient, Logger logger){
         String accountName = new String(req.accNameUtf8Bytes, StandardCharsets.UTF_8);
         Future<SHA256Item> checkedAccountIDFuture = checkAccountID(accountName, vertxMySQLClient, logger);
-//        doWaitOnFuture(checkedAccountIDFuture);
+        doWaitOnFuture(checkedAccountIDFuture);
         if (checkedAccountIDFuture.succeeded()) {
             return checkedAccountIDFuture;
         } else {
@@ -286,7 +290,8 @@ public class NameNodeUtils {
 
         String ipString = Integer.toString(((int)ipBytes[0])) + "." + Integer.toString(((int)ipBytes[1])) + "." +
                 Integer.toString(((int)ipBytes[2])) + "." + Integer.toString(((int)ipBytes[3]));
-        NameNodeClient client = new NameNodeClient(ipString, lInstanceIdRsp.port, lVertx, lLogger);
+        String consumerName = CONSUMER_NAME_PREFIX + _consumerAddressSuffix.getAndIncrement();
+        NameNodeClient client = new NameNodeClient(ipString, lInstanceIdRsp.port, lVertx, consumerName, lLogger);
         client.startClient();
         Thread clientThread = new Thread(client);
         clientThread.start();
@@ -298,7 +303,7 @@ public class NameNodeUtils {
         }
 
         EventBus eventBus = lVertx.eventBus();
-        Future<Message<StorageClsMetaPayload>> future = eventBus.request("/clientreqhandler", nsIdRegReq);
+        Future<Message<StorageClsMetaPayload>> future = eventBus.request(consumerName, nsIdRegReq);
 
         doWaitOnFuture(future);
         if (future.succeeded()) {

@@ -12,6 +12,7 @@ import in.intellicar.layer5.service.namenode.client.NameNodeClient;
 import in.intellicar.layer5.utils.LittleEndianUtils;
 import in.intellicar.layer5.utils.sha.SHA256Item;
 import in.intellicar.layer5.utils.sha.SHA256Utils;
+import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
@@ -86,6 +87,18 @@ public class NameNodeUtils {
             e.printStackTrace();
         }
         return returnValue;
+    }
+
+    public static void getInstanceID(Vertx lVertx, SHA256Item lIdToBeMatched, Handler<AsyncResult<Message<StorageClsMetaPayload>>> lCallback, Logger logger) {
+        AssociatedInstanceIdReq req = new AssociatedInstanceIdReq(lIdToBeMatched);
+        //StorageClsMetaBeacon beacon = new StorageClsMetaBeacon(seqID, req);
+        String consumerName = CONSUMER_NAME_PREFIX + _consumerAddressSuffix.getAndIncrement();
+        AssociatedInstanceIdRsp returnValue = null;
+
+        Thread clientThread = setUpAndStartClient(ZOOKEEPER_IP, ZOOKEEPER_PORT, lVertx, consumerName, logger);
+
+        EventBus eventBus = lVertx.eventBus();
+        eventBus.request(consumerName, req, lCallback);
     }
 
     private static <T> void doWaitOnFuture(Future<T> lFuture) {
@@ -165,6 +178,18 @@ public class NameNodeUtils {
         return generateIdForPath(pathArray, saltBytes);
     }
 
+    public static void sendRegisterAccountIdRequest(AssociatedInstanceIdRsp lInstanceIdRsp, AccIdGenerateRsp lAccIdGenRsp, Vertx lVertx, Handler<AsyncResult<Message<StorageClsMetaPayload>>> lCallback, Logger lLogger) {
+        AccIdRegisterReq accIdRegReq = new AccIdRegisterReq(lAccIdGenRsp.accountID, lAccIdGenRsp.accIdGenerateReq.accNameUtf8Bytes, ((IActAsClient)lAccIdGenRsp).getSalt().getBytes(StandardCharsets.UTF_8));
+        String ipString = getIpFromBytes(lInstanceIdRsp.ip);
+        String consumerName = CONSUMER_NAME_PREFIX + _consumerAddressSuffix.getAndIncrement();
+        AccIdRegisterRsp returnValue = null;
+
+        Thread clientThread = setUpAndStartClient(ipString, lInstanceIdRsp.port, lVertx, consumerName, lLogger);
+
+        EventBus eventBus = lVertx.eventBus();
+        eventBus.request(consumerName, accIdRegReq, lCallback);
+    }
+
     public static AccIdRegisterRsp sendRegisterAccountIdRequest(AssociatedInstanceIdRsp lInstanceIdRsp, SHA256Item lAccId, String lAccName, String lSalt, Vertx lVertx, Logger lLogger) {
         AccIdRegisterReq accIdRegReq = new AccIdRegisterReq(lAccId, lAccName.getBytes(StandardCharsets.UTF_8), lSalt.getBytes(StandardCharsets.UTF_8));
         String ipString = getIpFromBytes(lInstanceIdRsp.ip);
@@ -195,7 +220,7 @@ public class NameNodeUtils {
 
     }
 
-    private static void updateAckOfAccName(AccIdRegisterRsp lRsp, MySQLPool lVertxMySQLClient, Logger logger) {
+    public static void updateAckOfAccName(AccIdRegisterRsp lRsp, MySQLPool lVertxMySQLClient, Logger logger) {
         String accName = new String(lRsp.accIdRegisterReq.accountNameUtf8Bytes, StandardCharsets.UTF_8);
         String sql = "Update accounts.account_info set ack = '"+ lRsp.ackFlag +"' where account_name = '" + accName + "'";
         Future<RowSet<Row>> updateFuture = lVertxMySQLClient
@@ -235,9 +260,9 @@ public class NameNodeUtils {
 
             doWaitOnFuture(insertFuture);
             if (insertFuture.succeeded()) {
-                instanceIdRsp = getInstanceID(lVertx, accountIDSHA, logger);
-                AccIdRegisterRsp accIdRegisterRsp = sendRegisterAccountIdRequest(instanceIdRsp, accountIDSHA, accountName, salt, lVertx, logger);
-                updateAckOfAccName(accIdRegisterRsp, vertxMySQLClient, logger);
+                //instanceIdRsp = getInstanceID(lVertx, accountIDSHA, logger);
+                //AccIdRegisterRsp accIdRegisterRsp = sendRegisterAccountIdRequest(instanceIdRsp, accountIDSHA, accountName, salt, lVertx, logger);
+                //updateAckOfAccName(accIdRegisterRsp, vertxMySQLClient, logger);
                 return Future.succeededFuture(accountIDSHA);
             }
             else {
@@ -290,6 +315,18 @@ public class NameNodeUtils {
         return generateIdForPath(pathArray, salt);
     }
 
+    public static void sendRegisterNsIdRequest(AssociatedInstanceIdRsp lInstanceIdRsp, NsIdGenerateRsp lNsIdGenRsp, Vertx lVertx, Handler<AsyncResult<Message<StorageClsMetaPayload>>> lCallback, Logger lLogger) {
+        NsIdRegisterReq nsIdRegReq = new NsIdRegisterReq(lNsIdGenRsp.namespaceID, lNsIdGenRsp.nsIdGenerateReq.accountID, lNsIdGenRsp.nsIdGenerateReq.namespaceBytes, ((IActAsClient)lNsIdGenRsp).getSalt().getBytes(StandardCharsets.UTF_8));
+        String ipString = getIpFromBytes(lInstanceIdRsp.ip);
+        String consumerName = CONSUMER_NAME_PREFIX + _consumerAddressSuffix.getAndIncrement();
+        NsIdRegisterRsp returnValue = null;
+
+        Thread clientThread = setUpAndStartClient(ipString, lInstanceIdRsp.port, lVertx, consumerName, lLogger);
+
+        EventBus eventBus = lVertx.eventBus();
+        eventBus.request(consumerName, nsIdRegReq, lCallback);
+    }
+
     public static NsIdRegisterRsp sendRegisterNsIdRequest(AssociatedInstanceIdRsp lInstanceIdRsp, SHA256Item lNsId, SHA256Item lAccId, String lNsName, String lSalt, Vertx lVertx, Logger lLogger) {
         NsIdRegisterReq nsIdRegReq = new NsIdRegisterReq(lNsId, lAccId, lNsName.getBytes(StandardCharsets.UTF_8), lSalt.getBytes(StandardCharsets.UTF_8));
         String ipString = getIpFromBytes(lInstanceIdRsp.ip);
@@ -319,7 +356,7 @@ public class NameNodeUtils {
         return returnValue;
     }
 
-    private static void updateAckOfNsName(NsIdRegisterRsp lRsp, MySQLPool lVertxMySQLClient, Logger logger) {
+    public static void updateAckOfNsName(NsIdRegisterRsp lRsp, MySQLPool lVertxMySQLClient, Logger logger) {
         String nsName = new String(lRsp.nsIdRegisterReq.nsNameUtf8Bytes, StandardCharsets.UTF_8);
         String sql = "Update accounts.namespaceinfo set ack = '"+ lRsp.ackFlag +"' where namespace_name = '" + nsName +
                 "' and account_id = '" + lRsp.nsIdRegisterReq.accountId.toHex();
@@ -349,9 +386,9 @@ public class NameNodeUtils {
 
             doWaitOnFuture(insertFuture);
             if (insertFuture.succeeded()) {
-                AssociatedInstanceIdRsp instanceIdRsp = getInstanceID(lVertx, namespaceID, lLogger);
-                NsIdRegisterRsp nsIdRegisterRsp = sendRegisterNsIdRequest(instanceIdRsp, namespaceID, lReq.accountID, namespaceName, salt, lVertx, lLogger);
-                updateAckOfNsName(nsIdRegisterRsp, lVertxMySQLClient, lLogger);
+                //AssociatedInstanceIdRsp instanceIdRsp = getInstanceID(lVertx, namespaceID, lLogger);
+                //NsIdRegisterRsp nsIdRegisterRsp = sendRegisterNsIdRequest(instanceIdRsp, namespaceID, lReq.accountID, namespaceName, salt, lVertx, lLogger);
+                //updateAckOfNsName(nsIdRegisterRsp, lVertxMySQLClient, lLogger);
                 return Future.succeededFuture(namespaceID);
             } else {
                 return Future.failedFuture(insertFuture.cause());

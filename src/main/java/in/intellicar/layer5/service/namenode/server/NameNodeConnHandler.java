@@ -2,9 +2,16 @@ package in.intellicar.layer5.service.namenode.server;
 
 import in.intellicar.layer5.beacon.Layer5Beacon;
 import in.intellicar.layer5.beacon.Layer5BeaconParser;
+import in.intellicar.layer5.beacon.storagemetacls.PayloadTypes;
 import in.intellicar.layer5.beacon.storagemetacls.StorageClsMetaBeacon;
 import in.intellicar.layer5.beacon.storagemetacls.StorageClsMetaPayload;
+import in.intellicar.layer5.beacon.storagemetacls.payload.metaclsservice.AssociatedInstanceIdRsp;
+import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.client.AccIdGenerateReq;
+import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.client.AccIdGenerateRsp;
+import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.client.IActAsClient;
+import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.client.NsIdGenerateRsp;
 import in.intellicar.layer5.data.Deserialized;
+import in.intellicar.layer5.service.namenode.utils.NameNodeUtils;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
@@ -17,11 +24,12 @@ import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.eventbus.EventBus;
 import io.vertx.core.eventbus.Message;
-import io.vertx.core.eventbus.MessageConsumer;
 
 import java.util.ArrayList;
+import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -51,6 +59,9 @@ public class NameNodeConnHandler extends ChannelInboundHandlerAdapter {
 
     public static int MAIL_ADDED = 1;
 
+    private LinkedBlockingDeque<StorageClsMetaPayload> _requestQueue;
+    private AtomicBoolean _isProcessing = new AtomicBoolean(false);
+
     public NameNodeConnHandler(String scratchDir, Logger logger, Layer5BeaconParser l5parser, Vertx vertx) {
         super();
         this.handlerCountLocal = handlerCount.incrementAndGet();
@@ -61,6 +72,7 @@ public class NameNodeConnHandler extends ChannelInboundHandlerAdapter {
 
         this.eventBus = vertx.eventBus();
         this.mailbox = new LinkedBlockingQueue<>();
+        _requestQueue = new LinkedBlockingDeque<>();
 
         this.seqId = 0;
         this.ctx = null;
@@ -151,17 +163,92 @@ public class NameNodeConnHandler extends ChannelInboundHandlerAdapter {
 
             StorageClsMetaBeacon storageClsMetaBeacon = (StorageClsMetaBeacon) eachBeacon;
             logger.info("Beacon received::" + storageClsMetaBeacon.toJsonString(logger));
-            Handler<AsyncResult<Message<StorageClsMetaPayload>>> replyCallback = new Handler<>() {
+
+
+            _requestQueue.add(storageClsMetaBeacon.getPayload());
+
+        }
+    }
+
+    private void processRequest()
+    {
+        if(!_isProcessing.get() && _requestQueue.size() > 0)
+        {
+            _isProcessing.set(true);
+            StorageClsMetaPayload requestPayload = getNextRequestPayload();
+            Handler<AsyncResult<Message<StorageClsMetaPayload>>> replyCallback = new Handler<>()
+            {
                 @Override
                 public void handle(AsyncResult<Message<StorageClsMetaPayload>> event) {
-                    if (ctx != null && !ctx.isRemoved() && event.result()!= null) {
-                        mailbox.add(event.result().body());
-                        ctx.pipeline().fireUserEventTriggered(MAIL_ADDED);
+                    if (ctx != null && !ctx.isRemoved() && event.result() != null) {
+                        StorageClsMetaPayload responsePayload = event.result().body();
+                        boolean needToActAsClient = (responsePayload instanceof IActAsClient) && ((IActAsClient) responsePayload).isToBeRegistered();
+                        if(needToActAsClient)
+                        {
+                            IActAsClient genReqRsp = (IActAsClient) responsePayload;
+                            Handler<AsyncResult<Message<StorageClsMetaPayload>>> matchingIdReplyCallback = new Handler<>() {
+                                @Override
+                                public void handle(AsyncResult<Message<StorageClsMetaPayload>> event)
+                                {
+                                    StorageClsMetaPayload associatedIdResponse = event.result().body();
+                                    Handler<AsyncResult<Message<StorageClsMetaPayload>>> registerIdReplyCallback = new Handler<>() {
+                                        @Override
+                                        public void handle(AsyncResult<Message<StorageClsMetaPayload>> event) {
+                                            StorageClsMetaPayload idRegisterResponse = event.result().body();
+                                            Handler<AsyncResult<Message<StorageClsMetaPayload>>> updateAckReplyCallback = new Handler<>() {
+                                                @Override
+                                                public void handle(AsyncResult<Message<StorageClsMetaPayload>> event) {
+                                                    //TheEnd
+                                                    mailbox.add(responsePayload);
+                                                    ctx.pipeline().fireUserEventTriggered(MAIL_ADDED);
+                                                    _isProcessing.set(false);
+                                                    processRequest();
+                                                }
+                                            };
+                                            eventBus.request("/mysqlqueryhandler", idRegisterResponse, updateAckReplyCallback);
+                                        }
+                                    };
+                                    if(requestPayload.getSubType() == PayloadTypes.ACCOUNT_ID_GEN_REQ.getSubType()) {
+                                        NameNodeUtils.sendRegisterAccountIdRequest((AssociatedInstanceIdRsp) associatedIdResponse, (AccIdGenerateRsp) responsePayload, vertx, registerIdReplyCallback, logger);
+                                    }
+                                    else if(requestPayload.getSubType() == PayloadTypes.NS_ID_GEN_REQ.getSubType())
+                                    {
+                                        NameNodeUtils.sendRegisterNsIdRequest((AssociatedInstanceIdRsp) associatedIdResponse, (NsIdGenerateRsp) responsePayload, vertx, registerIdReplyCallback, logger);
+                                    }
+                                }
+                            };
+                            NameNodeUtils.getInstanceID(vertx, ((IActAsClient) responsePayload).getIdToBeMatched(),matchingIdReplyCallback, logger);
+                        }
+                        else//don't need further processing
+                        {
+                            mailbox.add(responsePayload);
+                            ctx.pipeline().fireUserEventTriggered(MAIL_ADDED);
+                            _isProcessing.set(false);
+                            processRequest();
+                        }
                     }
                 }
             };
+            eventBus.request("/mysqlqueryhandler", requestPayload, replyCallback);
+        }
+    }
 
-            eventBus.request("/mysqlqueryhandler", storageClsMetaBeacon.getPayload(), replyCallback);
+    /**
+     * assuming _requestQueue.size() > 0, so calling method should check it beforehand
+     * @return
+     */
+    private StorageClsMetaPayload getNextRequestPayload()
+    {
+        while (true){
+            StorageClsMetaPayload nextPayload = null;
+            try {
+                nextPayload = _requestQueue.poll(1000, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            if (nextPayload != null){
+                return nextPayload;
+            }
         }
     }
 
@@ -173,6 +260,7 @@ public class NameNodeConnHandler extends ChannelInboundHandlerAdapter {
         if (layer5Beacons.size() > 0){
             handleLayer5Beacons(layer5Beacons);
         }
+        processRequest();
     }
 
     public void createLA5BeaconAndSend(StorageClsMetaPayload payload){

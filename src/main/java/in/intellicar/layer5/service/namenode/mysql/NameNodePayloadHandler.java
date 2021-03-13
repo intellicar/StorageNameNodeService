@@ -51,6 +51,9 @@ public class NameNodePayloadHandler implements IPayloadRequestHandler {
                 } else {
                     return new StorageClsMetaErrorRsp(accIdRegRspFuture.cause().getLocalizedMessage(), lRequestPayload);
                 }
+            case ACCOUNT_ID_REG_RSP://TODO:: using it to update ack for now, might need to change it in future
+                NameNodeUtils.updateAckOfAccName((AccIdRegisterRsp) lRequestPayload, lVertxMySQLClient, lLogger);
+                return lRequestPayload;
             case NS_ID_GEN_REQ:
                 Future<SHA256Item> nsIdFuture = NameNodeUtils.getNamespaceId((NsIdGenerateReq) lRequestPayload, _vertx, lVertxMySQLClient, lLogger);
                 if(nsIdFuture.isComplete() && nsIdFuture.succeeded())
@@ -67,6 +70,9 @@ public class NameNodePayloadHandler implements IPayloadRequestHandler {
                 } else {
                     return new StorageClsMetaErrorRsp(nsIdRegRspFuture.cause().getLocalizedMessage(), lRequestPayload);
                 }
+            case NS_ID_REG_RSP://TODO:: using it to update ack for now, might need to change it in future
+                NameNodeUtils.updateAckOfNsName((NsIdRegisterRsp) lRequestPayload, lVertxMySQLClient, lLogger);
+                return lRequestPayload;
             case DIR_ID_GEN_REG_REQ:
                 Future<SHA256Item> dirIdFuture = NameNodeUtils.getDirId((DirIdGenerateAndRegisterReq) lRequestPayload, lVertxMySQLClient, lLogger);
                 if(dirIdFuture.isComplete() && dirIdFuture.succeeded())

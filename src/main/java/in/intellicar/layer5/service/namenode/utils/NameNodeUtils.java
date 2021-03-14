@@ -235,25 +235,30 @@ public class NameNodeUtils {
         }
     }
 
-    public static Future<SHA256Item> getAccountID(AccIdGenerateReq req, Vertx lVertx, MySQLPool vertxMySQLClient, Logger logger){
-        String accountName = new String(req.accNameUtf8Bytes, StandardCharsets.UTF_8);
+    public static Future<AccIdGenerateRsp> getAccountID(AccIdGenerateReq lReq, Vertx lVertx, MySQLPool vertxMySQLClient, Logger logger){
+        String accountName = new String(lReq.accNameUtf8Bytes, StandardCharsets.UTF_8);
         Future<SHA256Item> checkedAccountIDFuture = checkAccountID(accountName, vertxMySQLClient, logger);
         doWaitOnFuture(checkedAccountIDFuture);
-        String salt = Long.toHexString(System.nanoTime());
-        SHA256Item accountIDSHA = null;
-        AssociatedInstanceIdRsp instanceIdRsp = null;
-
-        // TODO: Remove this later
         if (checkedAccountIDFuture.succeeded()) {
-            accountIDSHA =  checkedAccountIDFuture.result();
-            instanceIdRsp = getInstanceID(lVertx, accountIDSHA, logger);
-            AccIdRegisterRsp accIdRegisterRsp = sendRegisterAccountIdRequest(instanceIdRsp, accountIDSHA, accountName, salt, lVertx, logger);
-            updateAckOfAccName(accIdRegisterRsp, vertxMySQLClient, logger);
-            return Future.succeededFuture(accountIDSHA);
-        }
-
-        else {
-            accountIDSHA = generateAccountId(req.accNameUtf8Bytes, salt.getBytes());
+            return Future.succeededFuture(new AccIdGenerateRsp(lReq, checkedAccountIDFuture.result()));
+        } else {
+            String salt = Long.toHexString(System.nanoTime());
+            SHA256Item accountIDSHA = generateAccountId(lReq.accNameUtf8Bytes, salt.getBytes());
+//        String salt = Long.toHexString(System.nanoTime());
+//        SHA256Item accountIDSHA = null;
+//        AssociatedInstanceIdRsp instanceIdRsp = null;
+//
+//        // TODO: Remove this later
+//        if (checkedAccountIDFuture.succeeded()) {
+//            accountIDSHA =  checkedAccountIDFuture.result();
+//            instanceIdRsp = getInstanceID(lVertx, accountIDSHA, logger);
+//            AccIdRegisterRsp accIdRegisterRsp = sendRegisterAccountIdRequest(instanceIdRsp, accountIDSHA, accountName, salt, lVertx, logger);
+//            updateAckOfAccName(accIdRegisterRsp, vertxMySQLClient, logger);
+//            return Future.succeededFuture(accountIDSHA);
+//        }
+//
+//        else {
+//            accountIDSHA = generateAccountId(req.accNameUtf8Bytes, salt.getBytes());
             //TODO: Update db.table_name
             Future<RowSet<Row>> insertFuture = vertxMySQLClient.preparedQuery("INSERT INTO accounts.account_info (account_name, salt, account_id, ack) values (?, ?, ?, ?)")
                     .execute(Tuple.of(accountName, salt, accountIDSHA.toHex(), 0));
@@ -263,7 +268,10 @@ public class NameNodeUtils {
                 //instanceIdRsp = getInstanceID(lVertx, accountIDSHA, logger);
                 //AccIdRegisterRsp accIdRegisterRsp = sendRegisterAccountIdRequest(instanceIdRsp, accountIDSHA, accountName, salt, lVertx, logger);
                 //updateAckOfAccName(accIdRegisterRsp, vertxMySQLClient, logger);
-                return Future.succeededFuture(accountIDSHA);
+                AccIdGenerateRsp accIdGenerateRsp = new AccIdGenerateRsp(lReq, accountIDSHA);
+                accIdGenerateRsp.isToBeRegistered(true);
+                accIdGenerateRsp.setSalt(salt);
+                return Future.succeededFuture(accIdGenerateRsp);
             }
             else {
                 return Future.failedFuture(insertFuture.cause());
@@ -372,10 +380,11 @@ public class NameNodeUtils {
         }
     }
 
-    public static Future<SHA256Item> getNamespaceId(NsIdGenerateReq lReq, Vertx lVertx, MySQLPool lVertxMySQLClient, Logger lLogger) {
+    public static Future<NsIdGenerateRsp> getNamespaceId(NsIdGenerateReq lReq, Vertx lVertx, MySQLPool lVertxMySQLClient, Logger lLogger) {
         Future<SHA256Item> existingNsIdFuture = checkNamespaceId(lReq, lVertxMySQLClient, lLogger);
+        doWaitOnFuture(existingNsIdFuture);
         if (existingNsIdFuture.succeeded()) {
-            return existingNsIdFuture;
+            return Future.succeededFuture(new NsIdGenerateRsp(lReq, existingNsIdFuture.result()));
         } else {
             String namespaceName = new String(lReq.namespaceBytes, StandardCharsets.UTF_8);
             String salt = Long.toHexString(System.nanoTime());
@@ -389,7 +398,10 @@ public class NameNodeUtils {
                 //AssociatedInstanceIdRsp instanceIdRsp = getInstanceID(lVertx, namespaceID, lLogger);
                 //NsIdRegisterRsp nsIdRegisterRsp = sendRegisterNsIdRequest(instanceIdRsp, namespaceID, lReq.accountID, namespaceName, salt, lVertx, lLogger);
                 //updateAckOfNsName(nsIdRegisterRsp, lVertxMySQLClient, lLogger);
-                return Future.succeededFuture(namespaceID);
+                NsIdGenerateRsp nsIdGenerateRsp = new NsIdGenerateRsp(lReq, namespaceID);
+                nsIdGenerateRsp.isToBeRegistered(true);
+                nsIdGenerateRsp.setSalt(salt);
+                return Future.succeededFuture(nsIdGenerateRsp);
             } else {
                 return Future.failedFuture(insertFuture.cause());
             }

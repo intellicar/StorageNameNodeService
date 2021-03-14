@@ -37,10 +37,10 @@ public class NameNodePayloadHandler implements IPayloadRequestHandler {
 
         switch (payloadType) {
             case ACCOUNT_ID_GEN_REQ:
-                Future<SHA256Item> accountIDFuture = NameNodeUtils.getAccountID((AccIdGenerateReq) lRequestPayload, _vertx, lVertxMySQLClient, lLogger);
-                if (accountIDFuture.succeeded()) {
-                    return null;
-//                    return accountIDFuture.result();
+                Future<AccIdGenerateRsp> accountIDFuture = NameNodeUtils.getAccountID((AccIdGenerateReq) lRequestPayload, _vertx, lVertxMySQLClient, lLogger);
+                if (accountIDFuture.isComplete() && accountIDFuture.succeeded()) {
+                    AccIdGenerateRsp accIdGenerateRsp = accountIDFuture.result();
+                    return accIdGenerateRsp;
                 } else {
                     return new StorageClsMetaErrorRsp(accountIDFuture.cause().getLocalizedMessage(), lRequestPayload);
                 }
@@ -55,11 +55,11 @@ public class NameNodePayloadHandler implements IPayloadRequestHandler {
                 NameNodeUtils.updateAckOfAccName((AccIdRegisterRsp) lRequestPayload, lVertxMySQLClient, lLogger);
                 return lRequestPayload;
             case NS_ID_GEN_REQ:
-                Future<SHA256Item> nsIdFuture = NameNodeUtils.getNamespaceId((NsIdGenerateReq) lRequestPayload, _vertx, lVertxMySQLClient, lLogger);
+                Future<NsIdGenerateRsp> nsIdFuture = NameNodeUtils.getNamespaceId((NsIdGenerateReq) lRequestPayload, _vertx, lVertxMySQLClient, lLogger);
                 if(nsIdFuture.isComplete() && nsIdFuture.succeeded())
                 {
-                    SHA256Item nsId = nsIdFuture.result();
-                    return new NsIdGenerateRsp((NsIdGenerateReq) lRequestPayload, nsId);
+                    NsIdGenerateRsp nsIdGenerateRsp = nsIdFuture.result();
+                    return nsIdGenerateRsp;
                 }
                 return new StorageClsMetaErrorRsp(nsIdFuture.cause().getMessage(), lRequestPayload);
 

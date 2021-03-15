@@ -106,14 +106,15 @@ public class NameNodeUtils {
         while (true) {
             synchronized (lFuture) {
 
+                if(lFuture.isComplete()) {
+                    return;
+                }
+
                 try {
                     lFuture.wait(500);
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
-            }
-            if(lFuture.isComplete()) {
-                return;
             }
         }
     }

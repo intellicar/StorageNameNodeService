@@ -265,7 +265,7 @@ public class NameNodeUtils {
             //TODO: Update db.table_name
             SHA256Item accountNameSHA = null;
             try {
-                accountNameSHA = SHA256Utils.getSHA256("in.intellicar".getBytes(StandardCharsets.UTF_8));
+                accountNameSHA = SHA256Utils.getSHA256(lReq.accNameUtf8Bytes);
             } catch (NoSuchAlgorithmException e) {
                 e.printStackTrace();
             }

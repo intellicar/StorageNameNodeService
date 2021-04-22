@@ -31,11 +31,13 @@ public class NameNodeChInit extends ChannelInitializer<SocketChannel> {
 
     public Logger logger;
     public Layer5BeaconParser l5parser;
+    private IPayloadBucketInfoProvider _bucketInfoProvider;
 
-    public NameNodeChInit(String scratchDir, NettyProps nettyProps, Vertx vertx) {
+    public NameNodeChInit(String scratchDir, NettyProps nettyProps, Vertx vertx, IPayloadBucketInfoProvider lPayloadBucketInfoProvider) {
         this.scratchDir = PathUtils.appendPath(scratchDir, "channelh");
         this.nettyProps = nettyProps;
         this.vertx = vertx;
+        _bucketInfoProvider = lPayloadBucketInfoProvider;
 
         this.logger = LogUtils.createLogger(this.scratchDir, NameNodeChInit.class.getName(), "handler");
         l5parser = Layer5BeaconParser.getHandler(NameNodeChInit.class.getName(), this.logger);
@@ -50,7 +52,7 @@ public class NameNodeChInit extends ChannelInitializer<SocketChannel> {
         ch.pipeline().
                 addLast(new IdleStateHandler((long)nettyProps.heartBeatInterval,0L,0L,
                         TimeUnit.MILLISECONDS)).
-                addLast(new NameNodeConnHandler(this.scratchDir, this.logger, l5parser, vertx));
+                addLast(new NameNodeConnHandler(this.scratchDir, l5parser, vertx, _bucketInfoProvider, this.logger));
     }
 
     /**

@@ -53,14 +53,19 @@ public class StorageNameNodeService {
         });
 
         // STEP 3: Start the MYSQL Query Handler Thread
-        MySQLQueryHandler mysqlQueryHandler = new MySQLQueryHandler(vertx, serverProperties.scratchDir, serverProperties.dbMySQLProps,
-                new NameNodePayloadHandler(), consoleLogger);
-        mysqlQueryHandler.init();
-        mysqlQueryHandler.start();
+//        MySQLQueryHandler mysqlQueryHandler = new MySQLQueryHandler(vertx, serverProperties.scratchDir, serverProperties.dbMySQLProps,
+//                new NameNodePayloadHandler(), consoleLogger);
+//        mysqlQueryHandler.init();
+//        mysqlQueryHandler.start();
+        BucketModel bucketModel = new BucketModel();
+        BucketManager bucketManager = new BucketManager(vertx, serverProperties.scratchDir, serverProperties.dbMySQLProps,
+                bucketModel, consoleLogger);
+        bucketManager.init();
+        bucketManager.start();
 
         // STEP 4: Create the Netty Server for receiving Beacon type 1 msgs and replying
         NameNodeChInit channelInit = new NameNodeChInit(serverProperties.scratchDir,
-                serverProperties.nettyProps, vertx);
+                serverProperties.nettyProps, vertx, bucketModel);
         NettyTCPServer nettyTCPServer = new NettyTCPServer("/tcp/external",
                 PathUtils.appendPath(serverProperties.scratchDir, "tcpserver1"), serverProperties.nettyProps, channelInit);
         nettyTCPServer.start();
@@ -79,6 +84,7 @@ public class StorageNameNodeService {
 
         PathUtils.removeFile(serverProperties.stopFile);
         nettyTCPServer.stopReceiver(10000);
+        bucketManager.stopService();
         vertx.close();
         consoleLogger.info("Server Shutdown complete");
     }

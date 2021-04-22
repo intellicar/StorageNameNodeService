@@ -6,12 +6,15 @@ import in.intellicar.layer5.beacon.storagemetacls.PayloadTypes;
 import in.intellicar.layer5.beacon.storagemetacls.StorageClsMetaBeacon;
 import in.intellicar.layer5.beacon.storagemetacls.StorageClsMetaPayload;
 import in.intellicar.layer5.beacon.storagemetacls.payload.metaclsservice.AssociatedInstanceIdRsp;
+import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.IBucketRelatedIdInfoProvider;
 import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.client.AccIdGenerateReq;
 import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.client.AccIdGenerateRsp;
 import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.client.IActAsClient;
 import in.intellicar.layer5.beacon.storagemetacls.payload.namenodeservice.client.NsIdGenerateRsp;
+import in.intellicar.layer5.beacon.storagemetacls.service.common.props.BucketInfo;
 import in.intellicar.layer5.data.Deserialized;
 import in.intellicar.layer5.service.namenode.utils.NameNodeUtils;
+import in.intellicar.layer5.utils.sha.SHA256Item;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
@@ -26,6 +29,7 @@ import io.vertx.core.eventbus.EventBus;
 import io.vertx.core.eventbus.Message;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -61,14 +65,17 @@ public class NameNodeConnHandler extends ChannelInboundHandlerAdapter {
 
     private LinkedBlockingDeque<StorageClsMetaPayload> _requestQueue;
     private AtomicBoolean _isProcessing = new AtomicBoolean(false);
+    private IPayloadBucketInfoProvider _bucketInfoProvider;
+    private static String CONSUMER_ADDRESS_PREFIX = "/mysqlqueryhandler";
 
-    public NameNodeConnHandler(String scratchDir, Logger logger, Layer5BeaconParser l5parser, Vertx vertx) {
+    public NameNodeConnHandler(String scratchDir, Layer5BeaconParser l5parser, Vertx vertx, IPayloadBucketInfoProvider lPayloadBucketInfoProvider, Logger logger) {
         super();
         this.handlerCountLocal = handlerCount.incrementAndGet();
         this.scratchDir = scratchDir;
         this.logger = logger;
         this.l5parser = l5parser;
         this.vertx = vertx;
+        _bucketInfoProvider = lPayloadBucketInfoProvider;
 
         this.eventBus = vertx.eventBus();
         this.mailbox = new LinkedBlockingQueue<>();
@@ -205,7 +212,7 @@ public class NameNodeConnHandler extends ChannelInboundHandlerAdapter {
                                                     processRequest();
                                                 }
                                             };
-                                            eventBus.request("/mysqlqueryhandler", idRegisterResponse, updateAckReplyCallback);
+                                            eventBus.request(getVertexConsumerAddress(idRegisterResponse), idRegisterResponse, updateAckReplyCallback);
                                         }
                                     };
                                     if(requestPayload.getSubType() == PayloadTypes.ACCOUNT_ID_GEN_REQ.getSubType()) {
@@ -229,8 +236,42 @@ public class NameNodeConnHandler extends ChannelInboundHandlerAdapter {
                     }
                 }
             };
-            eventBus.request("/mysqlqueryhandler", requestPayload, replyCallback);
+            eventBus.request(getVertexConsumerAddress(requestPayload), requestPayload, replyCallback);
         }
+    }
+
+    private String getBucketRelatedIdStringForPayload(StorageClsMetaPayload lRequestPayload)
+    {
+        String returnValue = "";
+        if(lRequestPayload instanceof IBucketRelatedIdInfoProvider)
+        {
+            SHA256Item idToCheck = ((IBucketRelatedIdInfoProvider)lRequestPayload).getIdReleatedToBucket();
+            returnValue = idToCheck.toHex();
+        }
+        return returnValue;
+    }
+
+    private boolean isBucketMatched(String lIdToMatch, BucketInfo lBucket)
+    {
+        return lIdToMatch.compareToIgnoreCase(lBucket.startBucket.toHex()) > 0
+                && lIdToMatch.compareToIgnoreCase(lBucket.endBucket.toHex()) <= 0;
+    }
+
+    private String getConsumerAddressForBucket(BucketInfo lBucket)
+    {
+        String returnValue = CONSUMER_ADDRESS_PREFIX;
+        if(lBucket != null)
+            returnValue = returnValue + "/" + lBucket.startBucket.toHex() + "/" + lBucket.endBucket.toHex();
+        return returnValue;
+    }
+
+    private String getVertexConsumerAddress(StorageClsMetaPayload lRequestPayload)
+    {
+        String idToCheck = getBucketRelatedIdStringForPayload(lRequestPayload);
+        String returnValue = "";
+        BucketInfo matchedBucket = _bucketInfoProvider.getBucketForPayload(lRequestPayload);
+        returnValue = getConsumerAddressForBucket(matchedBucket);
+        return returnValue;
     }
 
     /**
